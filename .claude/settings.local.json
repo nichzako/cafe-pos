@@ -35,7 +35,12 @@
       "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\('next:', p.dependencies.next\\)\")",
       "Bash(npm test:*)",
       "Bash(grep -v \"^$\")",
-      "Bash(npx skills *)"
+      "Bash(npx skills *)",
+      "Bash(npx vercel *)",
+      "Bash(git mv *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }
