@@ -1,0 +1,65 @@
+{
+  "$schema": "https://aka.ms/codetour-schema",
+  "title": "Feature Explainer — Payment Flow (ชำระเงิน 3 วิธี)",
+  "description": "เข้าใจ payment flow ตั้งแต่ต้นจนจบ: Order Detail page → PaymentModal (Cash/PromptPay/Card) → API route → payment.service → Prisma transaction → Receipt สร้าง. ทัวร์นี้สำหรับนักพัฒนาที่ต้องการแก้ไข payment หรือเพิ่ม payment method ใหม่",
+  "ref": "main",
+  "steps": [
+    {
+      "directory": "src/app/(dashboard)/orders/[id]",
+      "title": "1. ภาพรวม — Payment Feature Files",
+      "description": "Payment flow กระจายอยู่ 3 ชั้น:\n\n**UI Layer** (โฟลเดอร์นี้):\n- `page.tsx` — Order detail, โหลดข้อมูล, ส่งให้ OrderDetailClient\n- `_components/OrderDetailClient.tsx` — Client: จัดการ modal state\n- `_components/PaymentModal.tsx` — tabs เลือกวิธีชำระ\n- `_components/CashPaymentForm.tsx` — เงินสด + เงินทอน\n- `_components/PromptPayForm.tsx` — สร้าง QR + polling\n- `_components/CardPaymentForm.tsx` — Omise card tokenization\n\n**API Layer**:\n- `src/app/api/payment/cash/route.ts`\n- `src/app/api/payment/promptpay/route.ts`\n- `src/app/api/payment/card/route.ts`\n\n**Service Layer**:\n- `src/lib/services/payment.service.ts` — business logic ทั้งหมด\n- `src/lib/omise-client.ts` — Omise API wrapper"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/[id]/page.tsx",
+      "line": 12,
+      "title": "2. OrderDetailPage — ดึงข้อมูลออเดอร์",
+      "description": "**Situation**: หน้า Order Detail ต้องรู้ว่า order มีสถานะอะไร ชำระแล้วหรือยัง\n\n**Mechanism**: Server Component ดึง order พร้อม `include` ครบ: items, table, staff, payment, receipt — ใน query เดียว\n\n**Implication**: ถ้า `payment` field ไม่ใช่ null แปลว่าชำระแล้ว — OrderDetailClient ใช้ข้อมูลนี้ซ่อน/แสดงปุ่มชำระเงิน\n\n**Gotcha**: `params` เป็น `Promise<{ id: string }>` ใน Next.js 15 (breaking change จาก 14) ต้อง `await params` ก่อนใช้ id ถ้าลืม TypeScript จะ error"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/[id]/_components/PaymentModal.tsx",
+      "line": 24,
+      "title": "3. PaymentModal — เลือกวิธีชำระเงิน",
+      "description": "**Situation**: Modal หลักที่รวม 3 วิธีชำระเงินเข้าไว้ด้วยกัน\n\n**Mechanism**: `METHODS` array บรรทัด 18 กำหนด tabs ที่แสดง — เฉพาะ cash/promptpay/card (mockup ไม่อยู่ที่นี่ — เป็น dev-only endpoint)\n\nเมื่อเลือก tab → `setMethod(m.id)` → render form ที่ตรงกัน (`CashPaymentForm`, `PromptPayForm`, `CardPaymentForm`)\n\n**Implication**: ใช้ ARIA tablist/tab/tabpanel ถูกต้อง — `role=\"tablist\"`, `aria-selected`, `aria-controls` ทำให้ navigate ด้วย keyboard ได้\n\n**Gotcha**: `handleSuccess` บรรทัด 27 เพียงแค่เรียก `onClose()` — การ navigate ไปหน้าใบเสร็จเป็นหน้าที่ของ form แต่ละตัว ไม่ใช่ modal"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/[id]/_components/CashPaymentForm.tsx",
+      "line": 16,
+      "title": "4. CashPaymentForm — เงินสด + เงินทอน",
+      "description": "**Situation**: พนักงานรับเงินสดจากลูกค้า ต้องระบุยอดที่รับมา ระบบคำนวณเงินทอน\n\n**Mechanism**:\n- `DENOMINATIONS = [20, 50, 100, 500, 1000]` — ปุ่มลัดเลือกธนบัตร\n- `handleDenomination(value)` บรรทัด 25: คลิกแรก = ตั้งค่า, คลิกต่อไป = บวกสะสม (pattern นี้เหมาะกับ POS จริง)\n- `change = Math.max(0, amountTendered - total)` — เงินทอน 0 ถ้าจ่ายพอดี\n- `isEnough` — ป้องกัน submit ถ้าจ่ายไม่ครบ\n\n**Implication**: UX ออกแบบมาสำหรับ cashier ที่ต้องทำเร็วใน POS จริง — ไม่ต้องพิมพ์ตัวเลข\n\n**Gotcha**: validation `amountTendered >= total` ทำทั้งฝั่ง UI (disable submit) และ server (payment.service throw ถ้าไม่พอ) — defense in depth"
+    },
+    {
+      "file": "src/app/api/payment/cash/route.ts",
+      "line": 8,
+      "title": "5. POST /api/payment/cash — Route บางมาก จงใจ",
+      "description": "**Situation**: API route สำหรับชำระเงินสด\n\n**Mechanism**: route นี้ทำแค่ 4 อย่าง:\n1. `requireAuth` + `requireRole(['admin', 'cashier'])`\n2. Zod validate body ด้วย `cashPaymentSchema`\n3. delegate ทั้งหมดไปที่ `processCashPayment(orderId, staff.id, amountTendered)`\n4. return result\n\n**Implication**: Business logic ทั้งหมดอยู่ใน `payment.service.ts` — route ไม่รู้ว่า DB transaction ทำอะไร ทำให้ test service ได้โดยไม่ต้องผ่าน HTTP layer\n\n**Gotcha**: `promptpay/route.ts` และ `card/route.ts` มี pattern เดียวกันเป๊ะ — แตกต่างแค่ schema และ service function ที่เรียก"
+    },
+    {
+      "file": "src/lib/services/payment.service.ts",
+      "line": 36,
+      "title": "6. fetchOrderForPayment — Guard ก่อน process",
+      "description": "**Situation**: ก่อนชำระเงิน ต้องตรวจว่า order พร้อมสำหรับการชำระจริงๆ\n\n**Mechanism**: 3 checks:\n1. Order ต้องมีอยู่ (`notFound` ถ้าไม่มี)\n2. Status ต้องเป็น `pending` เท่านั้น — ถ้าเป็น `preparing/ready/completed` จะ throw `badRequest`\n3. ห้ามมี payment อยู่แล้ว (`conflict` ถ้ามี) — ป้องกันชำระซ้ำ\n\n**Implication**: ฟังก์ชันนี้ถูกเรียกเป็น step แรกของทุก payment method — centralizes guard logic แทนที่จะซ้ำในแต่ละ method\n\n**Gotcha**: `ORDER_FOR_PAYMENT_INCLUDE` บรรทัด 16 ใช้ `satisfies Prisma.OrderInclude` — เป็น Prisma pattern ที่ให้ TypeScript infer exact return type แทนการ cast ด้วย `as`"
+    },
+    {
+      "file": "src/lib/services/payment.service.ts",
+      "line": 81,
+      "title": "7. commitPayment — Atomic Transaction สำคัญมาก",
+      "description": "**Situation**: การชำระเงินต้องทำ 4 อย่างพร้อมกัน ถ้าอย่างใดอย่างหนึ่งล้มเหลวต้อง rollback ทั้งหมด\n\n**Mechanism**: `prisma.$transaction(async (tx) => { ... })` บรรทัด 94 — ทำ 4 อย่างใน transaction เดียว:\n1. `tx.payment.create` — สร้าง payment record\n2. `tx.receipt.create` — สร้างใบเสร็จ (snapshot ข้อมูล ณ เวลานั้น)\n3. `tx.order.update` status → `completed`\n4. `tx.table.update` status → `available` (ถ้ามี tableId)\n\n**Implication**: ถ้า receipt create ล้มเหลว payment และ order update จะ rollback อัตโนมัติ — ไม่มีสถานะ half-committed ที่ทำให้ data corrupt\n\n**Gotcha**: Retry loop (bรรทัด 88) handle `P2002` (receiptNumber collision) เหมือนกับ orderNumber ใน order.service — pattern เดียวกัน เพราะทั้งคู่ใช้ count-then-construct"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/[id]/_components/PromptPayForm.tsx",
+      "line": 1,
+      "title": "8. PromptPayForm — QR Code + Polling",
+      "description": "**Situation**: PromptPay ต้องสร้าง QR ให้ลูกค้า scan แล้วรอ confirm\n\n**Mechanism**: Flow 2 ขั้นตอน:\n1. POST `/api/payment/promptpay` → server สร้าง QR data (`generatePromptPayQR`) คืน base64 image\n2. ลูกค้า scan → พนักงานกด \"ยืนยันการรับเงิน\" → POST `/api/payment/promptpay/confirm`\n\nไม่มี real webhook จาก PromptPay (ระบบ PromptPay ในไทยไม่รองรับ real-time callback) ดังนั้น confirm ต้องทำ manual โดยพนักงาน\n\n**Implication**: QR แสดงยอดเงินที่ต้องชำระพอดี — ดึงจาก `order.total` ไม่ใช่จาก client\n\n**Gotcha**: `promptpay-qr` library สร้าง QR จาก phone number หรือ tax ID ที่กำหนดใน `PROMPTPAY_ID` env var — ต้องกรอกเบอร์จริงของร้าน"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/[id]/receipt/page.tsx",
+      "line": 1,
+      "title": "9. Receipt Page — หน้าใบเสร็จ",
+      "description": "**Situation**: หลังชำระสำเร็จ navigate มาที่ `/orders/{id}/receipt`\n\n**Mechanism**: Server Component โหลด receipt จาก DB — `receipt.data` เป็น JSON field ที่ snapshot ข้อมูลทั้งหมด ณ เวลาออกใบเสร็จ\n\nใบเสร็จแสดงข้อมูลจาก snapshot ไม่ใช่ join ใหม่จาก tables ปัจจุบัน — เพราะ menu ชื่ออาจเปลี่ยน, ราคาอาจปรับ, แต่ใบเสร็จที่ออกแล้วต้องคงเดิม\n\n**Implication**: `PrintButton.tsx` ใช้ `window.print()` — print CSS ถูก define แยกสำหรับ media print เพื่อซ่อน navigation และ sidebar\n\n**Gotcha**: `receipt.data` เป็น `Json` type ของ Prisma — ต้อง cast เป็น `ReceiptData` ก่อนใช้ TypeScript จะไม่รู้ shape ของมันโดยอัตโนมัติ"
+    },
+    {
+      "title": "สรุป — Payment Flow ทั้งหมด",
+      "description": "```\nOrderDetailClient (Client Component)\n  └─ กด \"ชำระเงิน\" → PaymentModal (isOpen=true)\n\nPaymentModal\n  └─ เลือก tab → CashPaymentForm / PromptPayForm / CardPaymentForm\n\nCashPaymentForm\n  └─ POST /api/payment/cash\n       └─ requireAuth + requireRole\n       └─ cashPaymentSchema.parse()\n       └─ processCashPayment(orderId, staffId, amountTendered)\n            └─ fetchOrderForPayment() — guard checks\n            └─ validate amountTendered >= total\n            └─ commitPayment() — $transaction:\n                 ├─ payment.create (status: paid)\n                 ├─ receipt.create (snapshot data)\n                 ├─ order.update  (status: completed)\n                 └─ table.update  (status: available)\n            └─ return { receiptId, receiptNumber, change }\n  └─ navigate → /orders/{id}/receipt\n```\n\n**Security note**: ราคาทั้งหมดดึงจาก DB server-side ใน `fetchOrderForPayment()` — client ส่งแค่ orderId, ไม่มีทางส่ง amount ที่ต้องการเองได้"
+    }
+  ]
+}

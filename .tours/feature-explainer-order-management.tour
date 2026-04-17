@@ -1,0 +1,83 @@
+{
+  "$schema": "https://aka.ms/codetour-schema",
+  "title": "Phase 6 — Order Management (ภาษาชาวบ้าน)",
+  "description": "ทัวร์ Phase 6 แบบเต็ม: หน้ารายการออเดอร์สำหรับ barista/cashier/admin — ตั้งแต่ต้นทางถึงปลายทาง",
+  "ref": "main",
+  "steps": [
+    {
+      "directory": "src/app/(dashboard)/orders",
+      "title": "🗺️ ภาพรวม — โฟลเดอร์ Phase 6",
+      "description": "นี่คือบ้านทั้งหมดของ Phase 6\n\nในโฟลเดอร์ `orders/` มีไฟล์ 5 ตัวที่ทำงานร่วมกัน:\n\n- **`page.tsx`** — ดึงข้อมูลจาก DB (Server Component)\n- **`loading.tsx`** — แสดง skeleton ระหว่างรอข้อมูล\n- **`error.tsx`** — แสดงหน้า error ถ้า DB พัง\n- **`_components/OrderListClient.tsx`** — จัดการ filter tabs และ grid (Client Component)\n- **`_components/OrderCard.tsx`** — card แต่ละใบ + ปุ่มเปลี่ยนสถานะ (Client Component)\n\nNext.js App Router รู้จักชื่อพิเศษเหล่านี้ (`loading.tsx`, `error.tsx`) และเรียกโดยอัตโนมัติ — เราไม่ต้อง import เองเลย"
+    },
+    {
+      "file": "src/lib/order-constants.ts",
+      "line": 8,
+      "title": "🔑 ACTIVE_ORDER_STATUSES — กฎว่าใครเห็นอะไร",
+      "description": "ก่อนทุกอย่าง ขอแนะนำ constant ตัวนี้ก่อน\n\nในระบบ POS มีสถานะ 5 อย่าง: `pending → preparing → ready → completed / cancelled`\n\nแต่ barista และ cashier **ไม่ควรเห็น** order ที่เสร็จแล้วหรือถูกยกเลิก — มันรกจอและไม่จำเป็น\n\nเลยกำหนดว่า **\"active\"** คือ 3 สถานะนี้เท่านั้น:\n```\n[\"pending\", \"preparing\", \"ready\"]\n```\n\nไฟล์นี้อยู่ใน `src/lib/` (ไม่ใช่ใน component) เพราะ API route และ page.tsx ต้องใช้ constant เดียวกัน — ถ้าแยกกันจะ drift แล้วบางวันก็จะไม่ตรงกัน"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/page.tsx",
+      "line": 13,
+      "title": "🏃 page.tsx — ประตูแรกที่ทุก request ผ่าน",
+      "description": "**`page.tsx` นี้คือ Server Component** — โค้ดทั้งหมดในนี้รันบน server ไม่มี JavaScript ส่งไปหา browser เลย\n\nบรรทัด 14: `getAuthenticatedStaff()` ตรวจว่า login อยู่ไหม ถ้าไม่มี → `redirect('/login')` ทันที\n\nบรรทัด 17: เช็ค role ว่าเป็น admin ไหม\n\n**ทำไมต้องเช็คที่นี่อีกครั้ง** ทั้งที่ layout.tsx ก็เช็คแล้ว?\n→ layout.tsx ดูแลการ redirect login แต่ page.tsx ต้องการ `staff.id` และ `staff.role` เพื่อตัดสินใจว่าจะดึงข้อมูลอย่างไร ดังนั้นต้อง call ซ้ำ — แต่ไม่ช้า เพราะ `getAuthenticatedStaff` มี `React.cache()` ครอบ (เรียกซ้ำ = query DB แค่ครั้งเดียวต่อ request)"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/page.tsx",
+      "line": 19,
+      "title": "📦 Prisma fetch + role-based filter",
+      "description": "บรรทัด 19-33: query Prisma โดยตรง\n\nสังเกต `where` clause:\n```ts\nwhere: isAdmin ? undefined : { status: { in: ACTIVE_ORDER_STATUSES } }\n```\n\n- Admin → `undefined` = ดูทั้งหมดทุกสถานะ\n- Barista/Cashier → เฉพาะ active orders 3 สถานะ\n\n**ทำไมไม่ไป fetch จาก `/api/orders` แทน?**\nเพราะ Server Component คุย Prisma ได้โดยตรง ไม่ต้องทำ HTTP round-trip ไปหาตัวเอง — เร็วกว่า และ type-safe กว่า\n\n`take: 100` = จำกัดไว้ที่ 100 รายการล่าสุด ถ้าเกินกว่านี้จะมี note แสดงที่หน้าจอ"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/page.tsx",
+      "line": 36,
+      "title": "🔄 Serialize — ของขวัญก่อนข้ามเส้นแดง Server→Client",
+      "description": "บรรทัด 36-40: แปลง Prisma object ก่อนส่งให้ Client Component\n\nมีสองอย่างที่ต้องแปลง:\n1. **`total`** — Prisma คืนเป็น `Decimal` object (ไม่ใช่ตัวเลขธรรมดา) → ต้องแปลงเป็น `number` ด้วย `Number()`\n2. **`createdAt`** — Prisma คืนเป็น `Date` object → ต้องแปลงเป็น ISO string ด้วย `.toISOString()`\n\n**ทำไมต้องแปลง?**\nNext.js ส่ง data ข้ามเส้นแดง Server→Client เป็น JSON — และ JSON serialize `Decimal` หรือ `Date` ไม่ได้โดยตรง ถ้าไม่แปลงก่อนจะ runtime error"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/loading.tsx",
+      "line": 1,
+      "title": "⏳ loading.tsx — ไฟล์เล็กที่มีผลใหญ่",
+      "description": "ไฟล์นี้ดูธรรมดา — แต่มันทำงานแบบ **magic** ของ Next.js App Router\n\nแค่มีไฟล์ชื่อ `loading.tsx` อยู่ในโฟลเดอร์เดียวกับ `page.tsx` Next.js จะ:\n1. แสดง loading.tsx **ทันที** ที่ user navigate มา\n2. ดึงข้อมูลจาก DB อยู่เบื้องหลัง\n3. พอข้อมูลพร้อม สลับแสดง page.tsx ให้อัตโนมัติ\n\nUser เห็น skeleton card กระพริบๆ แทนที่จะเห็นจอขาวเปล่า — UX ดีขึ้นทันที โดยไม่ต้องเขียน loading state ใน component เอง"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/error.tsx",
+      "line": 11,
+      "title": "🔥 error.tsx — ตาข่ายรับเมื่อ DB พัง",
+      "description": "ถ้า Prisma ใน `page.tsx` throw error (เช่น DB ล่ม, connection timeout) Next.js จะ catch อัตโนมัติและแสดง `error.tsx` นี้แทน\n\n**สังเกต 2 อย่าง:**\n1. ต้อง `\"use client\"` เพราะ Next.js Error Boundary ต้องเป็น Client Component\n2. รับ prop `reset` — เป็น function ที่ Next.js ส่งมาให้ เรียก `reset()` เพื่อ retry load page ใหม่โดยไม่ต้อง refresh browser\n\n**ทำไมต้องมี?**\nถ้าไม่มี → user เห็น Next.js default error page ที่ไม่มี Thai copy และไม่มีปุ่มลองใหม่ — ในระบบ POS ที่ใช้งานจริง นี่ไม่ acceptable"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/_components/OrderListClient.tsx",
+      "line": 39,
+      "title": "🎛️ OrderListClient — สมองของ filter tabs",
+      "description": "นี่คือ Client Component ตัวหลักที่ user โต้ตอบด้วย\n\n**สิ่งที่ทำ:**\n- บรรทัด 40-41: เลือก tabs ตาม role — admin เห็น 6 tabs (ทั้งหมด), barista/cashier เห็นแค่ 3 (active)\n- บรรทัด 43-45: `useState` เก็บ tab ที่ active อยู่\n- บรรทัด 48-54: `useMemo` คำนวณ count แต่ละสถานะ — loop ผ่าน orders แค่รอบเดียว แทนที่จะ `.filter()` ซ้ำทุก tab\n- บรรทัด 56-59: filter orders ตาม tab ที่เลือก\n\n**Gotcha:** data ถูกดึงมาครั้งเดียวตอน load การสลับ tab ไม่ได้ fetch ใหม่ — แค่กรองจาก array ที่มีอยู่แล้วในหน่วยความจำ ทำให้ tab สลับเร็วมาก"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/_components/OrderListClient.tsx",
+      "line": 75,
+      "title": "♿ ARIA tabs — ทำให้ screen reader เข้าใจ",
+      "description": "บรรทัด 75-103: กลุ่ม tab buttons ที่ทำ ARIA ถูกต้อง\n\n- `role=\"tablist\"` บน container → บอกว่านี่คือกลุ่ม tab\n- `role=\"tab\"` บนแต่ละปุ่ม → บอกว่าแต่ละปุ่มเป็น tab\n- `aria-selected={isActive}` → บอกว่า tab ไหนถูกเลือก\n- `aria-controls` (บรรทัด 82) → **เซ็ตเฉพาะ tab ที่ active** ชี้ไปที่ panel ที่มีจริงใน DOM ตอนนั้น\n- บรรทัด 108-111: `role=\"tabpanel\"` + `aria-labelledby` → เชื่อม panel กับ tab\n\n**Gotcha:** `aria-controls` ของ tab ที่ inactive ถูกเซ็ตเป็น `undefined` โดยเจตนา — เพราะ panel ที่ inactive ไม่ได้ render อยู่ใน DOM ถ้าชี้ไปหา element ที่ไม่มี screen reader จะงง"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/_components/OrderCard.tsx",
+      "line": 18,
+      "title": "🔀 NEXT_ACTION — state machine แบบเรียบง่าย",
+      "description": "บรรทัด 18-25: ตาราง lookup ว่า status ปัจจุบัน → ปุ่มอะไรที่ต้องแสดง\n\n```\npending   → ปุ่ม \"เริ่มทำ\"      (→ preparing)\npreparing → ปุ่ม \"พร้อมเสิร์ฟ\"  (→ ready)\nready     → ปุ่ม \"เสร็จสิ้น\"   (→ completed)\n```\n\n`completed` และ `cancelled` ไม่มีใน map → `NEXT_ACTION[status]` คืน `undefined` → ไม่มีปุ่มแสดงเลย\n\nbรรทัด 44: ปุ่มยกเลิกแสดงเฉพาะ `(isAdmin || isOwner)` — เจ้าของออเดอร์หรือ admin เท่านั้น ไม่ใช่ทุกคน"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/_components/OrderCard.tsx",
+      "line": 47,
+      "title": "⚡ changeStatus — กดปุ่ม → API → refresh",
+      "description": "บรรทัด 47-68: ฟังก์ชันนี้คือใจกลางของ OrderCard\n\n**Flow เมื่อกดปุ่ม:**\n1. `setIsChanging(true)` → card หรี่ + ปุ่ม disable ทันที (ป้องกันกดซ้ำ)\n2. `setErrorMsg(null)` → ลบ error เก่าออก\n3. PATCH `/api/orders/:id` ส่ง `{ status: newStatus }`\n4. ถ้า `res.ok` → `router.refresh()` บอก Next.js ให้ดึงข้อมูลจาก Server Component ใหม่\n5. ถ้าไม่ ok → แกะ `data.error` ออกมาแสดงเป็น Thai error message (บรรทัด 60-61)\n6. ถ้า network ล่มสนิท → catch block แสดง \"ไม่สามารถเชื่อมต่อได้\"\n7. `finally` → `setIsChanging(false)` เสมอ ไม่ว่าจะสำเร็จหรือไม่\n\n**Gotcha:** `router.refresh()` ทำให้ทั้งหน้า refetch จาก server — ไม่ใช่ optimistic update แต่ในระบบ POS ที่ต้องการ data แม่นยำ นี่คือ trade-off ที่ตั้งใจ"
+    },
+    {
+      "file": "src/app/api/orders/[id]/route.ts",
+      "line": 17,
+      "title": "🛡️ PATCH route — ยาม ALLOWED_TRANSITIONS ฝั่ง server",
+      "description": "บรรทัด 17-21: ตาราง state machine ฝั่ง server\n\nทุก status change ต้องผ่านตรงนี้ก่อน — ไม่ว่า client จะส่งอะไรมา server เช็คเสมอว่า transition นั้น allowed ไหม:\n```\npending   → preparing, cancelled\npreparing → ready, cancelled\nready     → completed\ncompleted → [] (ทำอะไรต่อไม่ได้)\ncancelled → [] (ทำอะไรต่อไม่ได้)\n```\n\nถ้าใครพยายาม hack ส่ง `pending → completed` โดยตรง → 400 Bad Request ทันที\n\n**Comment บรรทัด 13-16** อธิบาย design decision: non-cancel transitions เปิดให้ทุก staff ทำได้โดยเจตนา เพราะ barista ต้องกดเปลี่ยนสถานะออเดอร์คนอื่นได้ — มีแค่การ **ยกเลิก** ที่เช็ค ownership (บรรทัดถัดไป)"
+    },
+    {
+      "title": "✅ สรุป Phase 6 — Data Flow ทั้งหมด",
+      "description": "ตอนนี้คุณเห็นภาพรวมทั้งหมดแล้ว:\n\n```\nUser เปิด /orders\n    ↓\nloading.tsx แสดง skeleton ทันที\n    ↓\npage.tsx (Server) ตรวจ auth → fetch Prisma → serialize → ส่ง data ให้ Client\n    ↓\n[ถ้า DB พัง] error.tsx โชว์ + ปุ่มลองใหม่\n    ↓\nOrderListClient รับ orders → useMemo count → filter tabs → render OrderCard grid\n    ↓\nกดปุ่มบน OrderCard → PATCH /api/orders/:id\n    ↓\nAPI เช็ค ALLOWED_TRANSITIONS → update DB → return 200\n    ↓\nrouter.refresh() → page.tsx ดึงข้อมูลใหม่ → UI อัปเดต\n```\n\n**Phase ถัดไปที่น่าสนใจ:**\n- Admin panel — จัดการ menu, category, staff\n- Realtime updates ด้วย Supabase Realtime (barista เห็น order ใหม่โดยไม่ต้อง refresh)\n- Pagination ของ admin order list"
+    }
+  ]
+}

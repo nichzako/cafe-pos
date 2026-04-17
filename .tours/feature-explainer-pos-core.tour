@@ -1,0 +1,65 @@
+{
+  "$schema": "https://aka.ms/codetour-schema",
+  "title": "Feature Explainer — POS Core (หน้ารับออเดอร์หลัก)",
+  "description": "เข้าใจว่าหน้า POS ทำงานยังไงตั้งแต่ Server fetches ข้อมูล → cartReducer จัดการ state → submit สร้างออเดอร์ ทัวร์นี้สำหรับนักพัฒนาที่ต้องการเข้าใจ core feature ก่อนแก้ไขหรือเพิ่ม feature ใหม่",
+  "ref": "main",
+  "steps": [
+    {
+      "directory": "src/app/(dashboard)/pos",
+      "title": "1. ภาพรวม — โฟลเดอร์ POS",
+      "description": "นี่คือบ้านของ POS feature ทั้งหมด\n\nจุดสำคัญ: โฟลเดอร์นี้ไม่มี `loading.tsx` แบบ skeleton เพราะ **Server Component โหลดข้อมูลทั้งหมดก่อน render** — ผู้ใช้เห็นหน้าสมบูรณ์ตั้งแต่ครั้งแรก ไม่มี flash of empty content\n\n`_components/` มี 5 ชิ้น:\n- `POSClient.tsx` — orchestrator หลัก (useReducer + layout)\n- `cartReducer.ts` — pure state machine สำหรับ cart\n- `MenuGrid.tsx` — grid แสดงเมนูฝั่งซ้าย\n- `CategoryTabs.tsx` — tabs กรองหมวดหมู่\n- `OrderPanel.tsx` — panel ออเดอร์ฝั่งขวา + submit"
+    },
+    {
+      "file": "src/app/(dashboard)/pos/page.tsx",
+      "line": 9,
+      "title": "2. Server Component — โหลด 3 datasets พร้อมกัน",
+      "description": "**Situation**: หน้า POS ต้องการ 3 ชุดข้อมูล: categories, menus, tables\n\n**Mechanism**: `Promise.all([...])` บรรทัด 11 ยิง 3 queries ไป PostgreSQL พร้อมกันใน 1 round-trip — ไม่ใช่ sequential ที่ช้ากว่า\n\n**Implication**: เป็น async Server Component ทำงานบน server ก่อน render ผู้ใช้ไม่เห็น loading state เลย\n\n**Gotcha**: บรรทัด 41-45 แปลง `Decimal` → `number` ก่อนส่งเป็น props — Prisma คืน Decimal object ซึ่ง JSON serialize ไม่ได้โดยตรง ถ้าลืมแปลง client จะได้ `\"[object Object]\"` แทนราคา"
+    },
+    {
+      "file": "src/app/(dashboard)/pos/_components/POSClient.tsx",
+      "line": 34,
+      "title": "3. POSClient — Orchestrator หลัก",
+      "description": "**Situation**: Client Component ที่รับ props จาก Server แล้วควบคุม POS ทั้งหมด\n\n**Mechanism**: 4 state values:\n- `cart` (line 36) — จาก `useReducer(cartReducer, INITIAL_CART)` รูปแบบ Redux-lite\n- `activeCategoryId` — ติดตาม tab ที่เลือกอยู่\n- `isSubmitting` — ป้องกัน double-submit\n- `errorMsg` — แสดง error banner ฝั่ง UI\n\n**Implication**: `dispatch` ส่งผ่านไปยัง `MenuGrid` และ `OrderPanel` ทั้งคู่ — ทั้งสองคุยกันผ่าน reducer โดยไม่ต้องส่ง callback prop ลึกๆ\n\n**Gotcha**: `useReducer` ไม่ใช่ `useState` จงใจ — cart มีหลาย action types (ADD, REMOVE, UPDATE_QUANTITY, etc.) ถ้าใช้ useState จะต้องมี setter หลายตัวและเกิด race condition ได้"
+    },
+    {
+      "file": "src/app/(dashboard)/pos/_components/POSClient.tsx",
+      "line": 41,
+      "title": "4. filteredMenus — useMemo ป้องกัน recalculate ซ้ำ",
+      "description": "**Situation**: ทุก render ต้อง filter menus ตาม activeCategoryId ที่เลือก\n\n**Mechanism**: `useMemo` บรรทัด 41 — คำนวณใหม่เฉพาะเมื่อ `menus` หรือ `activeCategoryId` เปลี่ยน\n\n**Implication**: ถ้า cart items เปลี่ยน (เพิ่ม/ลบ) `filteredMenus` จะไม่ recalculate เพราะ dependencies ไม่เปลี่ยน\n\n`cartItemIds` (บรรทัด 49) ทำแบบเดียวกัน — เป็น Set<string> เพื่อ O(1) lookup ใน MenuGrid ว่า item นี้อยู่ใน cart แล้วหรือเปล่า (แสดง indicator)\n\n**Gotcha**: `activeCategoryId = null` หมายถึงแสดงทั้งหมด (`null` ≠ เลือก category ที่หาไม่เจอ)"
+    },
+    {
+      "file": "src/app/(dashboard)/pos/_components/cartReducer.ts",
+      "line": 9,
+      "title": "5. cartReducer — Pure State Machine",
+      "description": "**Situation**: Cart state มี 7 action types — ต้องทำทุก transition อย่าง predictable\n\n**Mechanism**: Pure function (no side effects) — รับ state + action, คืน state ใหม่เสมอ ใช้ spread `{ ...state }` ทุกที่ (immutable update)\n\n**Implication**: เนื่องจาก pure function ทดสอบได้ง่ายมาก — ไม่ต้อง mock React, browser, หรือ network\n\n**Gotcha — ADD_ITEM (line 11)**: ถ้า menuId ซ้ำ → เพิ่ม quantity แทนสร้าง item ใหม่ พฤติกรรมนี้สำคัญ ถ้าพนักงานกดเมนูเดิมสองครั้งจะได้ quantity: 2 ไม่ใช่ 2 rows"
+    },
+    {
+      "file": "src/app/(dashboard)/pos/_components/cartReducer.ts",
+      "line": 76,
+      "title": "6. Derived Values — ไม่เก็บ calculated state",
+      "description": "**Situation**: subtotal และ total ต้องคำนวณจาก items + discount\n\n**Mechanism**: 2 helper functions export แยก:\n- `getCartSubtotal(items)` — sum ของ `menuPrice × quantity`\n- `getCartTotal(items, discount)` — `Math.max(0, subtotal - discount)`\n\n**Implication**: `Math.max(0, ...)` ป้องกัน total ติดลบกรณีส่วนลดเกิน subtotal — validation ระดับ UI ที่เสริม Zod validation\n\n**Gotcha**: สองฟังก์ชันนี้ไม่ได้เป็น part ของ reducer แต่ export แยก เพราะ `OrderPanel` ต้องแสดง subtotal และ total แยกกัน ถ้าเก็บใน state จะต้อง sync ทุกครั้งที่ items เปลี่ยน"
+    },
+    {
+      "file": "src/app/(dashboard)/pos/_components/OrderPanel.tsx",
+      "line": 20,
+      "title": "7. OrderPanel — ฝั่งขวาของ POS",
+      "description": "**Situation**: แสดงรายการใน cart + ตัวเลือกโต๊ะ + summary + submit button\n\n**Mechanism**: รับ `cart`, `tables`, `dispatch`, `onSubmit`, `isSubmitting` จาก POSClient — ไม่มี local state ของตัวเอง (dumb component)\n\n- `getCartSubtotal` + `getCartTotal` เรียกใช้ derived values ที่ผ่าน review\n- `isEmpty` ควบคุมว่าแสดง `EmptyState` หรือ `<ul>` ของ CartItemRow\n\n**Implication**: การแยก OrderPanel ออกมาทำให้ POSClient ไม่บวมเกิน 200 บรรทัด (convention ของโปรเจกต์)\n\n**Gotcha**: `dispatch` ถูกส่งเป็น prop ตรงๆ ไม่ได้ wrap — เนื่องจาก `React.Dispatch<CartAction>` เป็น stable reference (React guarantee) จึงไม่ต้อง useCallback"
+    },
+    {
+      "file": "src/app/(dashboard)/pos/_components/MenuGrid.tsx",
+      "line": 26,
+      "title": "8. MenuGrid — Grid เมนูฝั่งซ้าย",
+      "description": "**Situation**: แสดง menus เป็น responsive grid, รองรับ loading skeleton และ empty state\n\n**Mechanism**:\n- `isLoading=true` → แสดง SkeletonCard 8 ตัว (MENU_SKELETON_COUNT)\n- `menus.length === 0` → แสดง EmptyState \"ไม่มีเมนูในหมวดนี้\"\n- Normal → grid `grid-cols-2 sm:grid-cols-3 lg:grid-cols-4`\n\n`cartItemIds` (Set<string>) ใช้ตรวจ O(1) ว่า menu นี้อยู่ใน cart แล้ว → แสดง visual indicator ให้พนักงานรู้\n\n**Implication**: `dispatch` ส่งมาจาก POSClient ผ่าน chain — MenuGrid → MenuCard → click → `dispatch({ type: 'ADD_ITEM', item })`\n\n**Gotcha**: `isLoading` ถูก set เป็น `false` ตลอดเวลาในปัจจุบัน (Server Component fetch) แต่ field นี้เตรียมไว้เพื่อ optimistic loading ในอนาคต"
+    },
+    {
+      "file": "src/app/(dashboard)/pos/_components/POSClient.tsx",
+      "line": 54,
+      "title": "9. handleSubmit — สร้างออเดอร์จริง",
+      "description": "**Situation**: พนักงานกดยืนยันออเดอร์ — ต้อง POST ไป API แล้ว navigate\n\n**Mechanism**:\n1. Guard: ถ้า `cart.items.length === 0` return ทันที\n2. `setIsSubmitting(true)` → ปิดปุ่มระหว่างรอ (ป้องกัน double-submit)\n3. POST `/api/orders` พร้อม tableId, items (menuId + quantity + note), discount\n4. Check `json.success` — ถ้า false แสดง errorMsg banner\n5. ถ้าสำเร็จ: `CLEAR_CART` + `router.push` ไปหน้า order detail\n\n**Implication**: client ส่งแค่ `menuId` + `quantity` ไม่ส่งราคา — server fetch ราคาเองจาก DB เสมอ (security: ป้องกัน price manipulation)\n\n**Gotcha**: บรรทัด 84 ใช้ `process.stderr.write` ไม่ใช่ `console.error` — ตาม ESLint rule ที่บังคับ no-console"
+    },
+    {
+      "title": "สรุป — Data Flow ของ POS",
+      "description": "```\nServer Component (page.tsx)\n  └─ Promise.all([categories, menus, tables])\n  └─ serialize Decimal → number\n  └─ render <POSClient ...props />\n\nPOSClient.tsx ('use client')\n  ├─ useReducer(cartReducer, INITIAL_CART) — cart state\n  ├─ CategoryTabs → setActiveCategoryId\n  ├─ MenuGrid → dispatch({ type: 'ADD_ITEM' })\n  └─ OrderPanel\n       ├─ CartItemRow → dispatch({ type: 'UPDATE_QUANTITY' / 'REMOVE_ITEM' })\n       └─ Submit → POST /api/orders → navigate /orders/{id}\n```\n\n**ขั้นต่อไป**: ดู tour `feature-explainer-payment-flow` เพื่อเข้าใจว่าหลังจาก navigate ไปหน้า order detail แล้วการชำระเงินทำงานยังไง"
+    }
+  ]
+}

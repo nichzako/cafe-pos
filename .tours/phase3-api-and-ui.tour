@@ -1,0 +1,100 @@
+{
+  "$schema": "https://aka.ms/codetour-schema",
+  "title": "Phase 3 — API Routes & UI Components",
+  "description": "ทัวร์ Phase 3 ของ Cafe POS: เข้าใจ API layer และ UI component ทุกตัว ตั้งแต่ error จนถึงปุ่มกด",
+  "steps": [
+    {
+      "directory": "src",
+      "title": "ภาพรวม Phase 3 — มีอะไรบ้าง?",
+      "description": "Phase 3 สร้างของ 2 กลุ่มใหญ่:\n\n**กลุ่มที่ 1 — API Layer** (ฝั่ง server)\n- `lib/api-error.ts` → กล่องเก็บ error ทุกประเภท\n- `lib/api-response.ts` → รูปแบบ JSON ที่ส่งกลับหาคนเรียก\n- `lib/route-handler.ts` → ตัวครอบ route อัตโนมัติ\n- `lib/api-auth.ts` → เช็ค login + เช็ค role\n- `app/api/categories/` → ตัวอย่าง route จริงที่ใช้ทุกชิ้นข้างบน\n\n**กลุ่มที่ 2 — UI Components** (ฝั่ง browser)\n- `components/ui/Button.tsx` → ปุ่มกดทุกจุดในระบบ\n- `components/ui/Badge.tsx` → ป้ายสถานะ (รอ / กำลังทำ / เสร็จ)\n- `components/ui/Modal.tsx` → popup dialog\n- `components/ui/Skeleton.tsx` → animation ตอนกำลังโหลด\n- `components/ui/EmptyState.tsx` → หน้าจอตอนไม่มีข้อมูล\n\nเดิน tour ตามลำดับนี้แล้วจะเห็นว่าทุกชิ้นต่อกันยังไง"
+    },
+    {
+      "file": "src/lib/api-error.ts",
+      "line": 11,
+      "title": "ApiError — กล่องบรรจุ Error แบบมีโครงสร้าง",
+      "description": "**สถานการณ์**: ปกติถ้าเกิด error ใน JavaScript เราแค่ `throw new Error('message')` ซึ่งไม่บอกว่าควรตอบกลับด้วย HTTP status อะไร\n\n**วิธีทำงาน**: `ApiError` ขยาย Error ธรรมดา โดยเพิ่ม 2 field:\n- `statusCode` — บอกว่าควรตอบ HTTP 400 / 401 / 403 / 404 / 409 / 500\n- `code` — string สั้นๆ เช่น `'NOT_FOUND'` สำหรับ debug\n\n**ทำไมสำคัญ**: route-handler.ts จะ `catch` และดู `instanceof ApiError` เพื่อรู้ว่าต้องตอบด้วย status อะไร ถ้าไม่ใช่ ApiError ก็ตอบ 500 เสมอ\n\n**จุดที่คนมองข้าม**: บรรทัด `this.name = 'ApiError'` ต้องมี ไม่งั้น stack trace แสดงแค่ 'Error' ทำให้ debug ยาก"
+    },
+    {
+      "file": "src/lib/api-error.ts",
+      "line": 24,
+      "title": "Helper Functions — เรียกสั้น ไม่ต้องจำเลข",
+      "description": "**สถานการณ์**: แทนที่จะเขียน `throw new ApiError('ข้อความ', 404)` ทุกครั้ง ซึ่งต้องจำเลข HTTP status\n\n**วิธีทำงาน**: มี helper function 7 ตัว ตั้งชื่อตาม HTTP status ที่ใช้บ่อย:\n```\nbadRequest()  → 400   // ข้อมูลที่ส่งมาไม่ถูก\nunauthorized() → 401  // ยังไม่ได้ login\nforbidden()   → 403   // login แล้ว แต่ไม่มีสิทธิ์\nnotFound()    → 404   // หาไม่เจอ\nconflict()    → 409   // ชนกับข้อมูลที่มีอยู่\nunprocessable() → 422 // ข้อมูลถูก format แต่ logic ผิด\nserverError() → 500   // พังจากฝั่ง server เอง\n```\n\n**ทำไมสำคัญ**: ถ้า route ใช้ `throw conflict('ชื่อซ้ำ')` แทน `throw new ApiError('ชื่อซ้ำ', 409)` — โค้ดอ่านรู้เรื่องกว่ามาก และไม่มีโอกาสพิมพ์เลขผิด"
+    },
+    {
+      "file": "src/lib/api-response.ts",
+      "line": 6,
+      "title": "successResponse — รูปแบบ JSON ที่ทุก route ต้องใช้",
+      "description": "**สถานการณ์**: ถ้าแต่ละ route ส่ง JSON กลับตามใจ บาง route ส่ง `{ data: [...] }` บางที ส่ง `{ result: [...] }` — frontend ต้องเดาตลอด\n\n**วิธีทำงาน**: มีแค่ 2 รูปแบบเสมอ:\n```json\n// สำเร็จ\n{ \"success\": true, \"data\": <ข้อมูล> }\n\n// ผิดพลาด\n{ \"success\": false, \"error\": \"ข้อความภาษาไทย\" }\n```\n\nสามฟังก์ชันหลัก:\n- `successResponse(data)` → 200 + success:true\n- `createdResponse(data)` → 201 + success:true (ใช้หลัง POST สร้างสำเร็จ)\n- `errorResponse(msg, status)` → ส่ง error กลับ\n\n**ทำไมสำคัญ**: `ApiResponse<T>` ใน `types/index.ts` เป็น TypeScript type ที่ match กันพอดี ทำให้ frontend รู้ล่วงหน้าแน่นอนว่า response จะมี shape ยังไง"
+    },
+    {
+      "file": "src/lib/route-handler.ts",
+      "line": 26,
+      "title": "withHandler — ตัวครอบทุก Route อัตโนมัติ",
+      "description": "**สถานการณ์**: ถ้าไม่มีตัวนี้ ทุก route ต้องเขียน try/catch เอง และจัดการ ZodError, ApiError ซ้ำๆ กันทุกไฟล์\n\n**วิธีทำงาน**: `withHandler` คือ Higher-Order Function — รับ handler เข้ามา แล้วคืน handler ตัวใหม่ที่มี try/catch ครอบอยู่ข้างนอก\n\nลำดับ catch:\n1. `ZodError` → ดึง message แรกออกมา → ตอบ 400\n2. `ApiError` → ใช้ statusCode จาก error โดยตรง\n3. error อื่นๆ ทั้งหมด → log ลง stderr → ตอบ 500 พร้อมข้อความกลางๆ (ไม่เปิดเผย detail)\n\n**ทำไมสำคัญ**: บรรทัด 41 — `process.stderr.write(...)` แทน `console.error(...)` เพราะ Vercel logs ดักจาก stderr ได้ดีกว่า และไม่มีทางรั่ว stack trace ออกไปหา client\n\n**ใช้งาน**: ทุก route จะเริ่มต้นด้วย `export const GET = withHandler(async (req) => { ... })`"
+    },
+    {
+      "file": "src/lib/api-auth.ts",
+      "line": 29,
+      "title": "requireAuth — ยืนยันตัวตนก่อนเข้า Route",
+      "description": "**สถานการณ์**: ทุก API route ของ POS ต้องการให้ login ก่อน ถ้าไม่มีตัวช่วย ทุก route ต้องเช็ค session เองซ้ำๆ\n\n**วิธีทำงาน**: 3 ขั้นตอน:\n1. เรียก Supabase เพื่อดู session ปัจจุบัน\n2. ถ้าไม่มี user → `throw unauthorized()` ทันที\n3. ดึง staff record จาก Prisma โดยใช้ `authId` (Supabase UUID) เพื่อหา role และสถานะ\n4. ถ้า staff ถูก inactive → `throw forbidden()`\n\n**คืนค่า**: `AuthenticatedStaff` object ที่มี id, name, role — route จะเอาไปใช้ต่อได้เลย\n\n**จุดที่คนมองข้าม**: parameter ชื่อ `_req` (มี underscore นำหน้า) เพราะจริงๆ ไม่ได้ใช้ request เลย — Supabase อ่าน cookie จาก context ของ Next.js เองผ่าน `createClient()` บรรทัด 33"
+    },
+    {
+      "file": "src/lib/api-auth.ts",
+      "line": 60,
+      "title": "requireRole — เช็คสิทธิ์ว่า Role ตรงไหม",
+      "description": "**สถานการณ์**: login แล้ว แต่ cashier ไม่ควรลบเมนูได้ — ต้องมีการแบ่งว่า role ไหนทำอะไรได้บ้าง\n\n**วิธีทำงาน**: รับ staff (จาก requireAuth) และ role ที่อนุญาต แล้วเช็คว่า staff.role อยู่ใน list หรือเปล่า\n\n```ts\nrequireRole(staff, 'admin')                  // admin เท่านั้น\nrequireRole(staff, ['admin', 'cashier'])     // admin หรือ cashier ก็ได้\n```\n\n**ทำไมสำคัญ**: ทำงานคู่กับ requireAuth เสมอ — ถ้าไม่ call requireAuth ก่อน จะไม่มี staff ให้ส่งเข้ามา\n\nดู pattern การใช้งานจริงใน route ถัดไป"
+    },
+    {
+      "file": "src/app/api/categories/route.ts",
+      "line": 9,
+      "title": "GET /api/categories — ดึงรายการหมวดหมู่",
+      "description": "**สถานการณ์**: หน้า POS ต้องการรายการหมวดหมู่เมนูเพื่อแสดงแท็บ (กาแฟ / ชา / เบเกอรี่)\n\n**วิธีทำงาน**:\n1. `requireAuth(req)` — ต้อง login ก่อน (cashier ธรรมดาก็ดูได้)\n2. `prisma.category.findMany()` — ดึงเฉพาะที่ isActive:true\n3. `select` แทน `select *` — ดึงเฉพาะ field ที่ต้องการ\n4. `_count` — นับเมนูที่ isAvailable:true ในแต่ละหมวด ใน query เดียว (ไม่ N+1)\n\n**ผลลัพธ์**:\n```json\n[\n  { \"id\": \"cld...\", \"name\": \"กาแฟ\", \"sortOrder\": 1, \"_count\": { \"menus\": 8 } },\n  { \"id\": \"cle...\", \"name\": \"ชา\", \"sortOrder\": 2, \"_count\": { \"menus\": 5 } }\n]\n```"
+    },
+    {
+      "file": "src/app/api/categories/route.ts",
+      "line": 27,
+      "title": "POST /api/categories — สร้างหมวดหมู่ใหม่",
+      "description": "**สถานการณ์**: admin เพิ่มหมวดหมู่ใหม่ผ่านหน้าจัดการเมนู\n\n**วิธีทำงาน**: 4 ขั้นตอนชัดเจน:\n1. `requireAuth` + `requireRole(staff, 'admin')` — เฉพาะ admin เท่านั้น\n2. `createCategorySchema.parse(body)` — Zod validate ทันที ถ้าผิด throw ZodError → withHandler จัดการต่อ\n3. เช็คชื่อซ้ำก่อน insert\n4. `createdResponse(category)` → ตอบ HTTP 201 (Created) แทน 200\n\n**ทำไม 201 ไม่ใช่ 200**: HTTP convention — 200 = OK (เจอของ), 201 = Created (สร้างสำเร็จ) frontend บางตัวใช้ status code ตัดสินใจว่าจะ refresh หรือเปล่า"
+    },
+    {
+      "file": "src/app/api/categories/[id]/route.ts",
+      "line": 30,
+      "title": "PATCH /api/categories/[id] — แก้ไขบางส่วน",
+      "description": "**สถานการณ์**: admin แก้ชื่อหมวดหมู่หรือเปลี่ยน sortOrder\n\n**วิธีทำงาน**:\n1. ดึง `id` จาก URL params: `const { id } = await ctx.params`\n2. เช็คก่อนว่ามีอยู่จริง → ถ้าไม่มี `throw notFound()`\n3. `updateCategorySchema.parse(body)` — schema นี้ทุก field เป็น optional (partial) เพราะ PATCH แก้แค่บางส่วนได้\n4. ถ้าเปลี่ยนชื่อ → เช็คชื่อใหม่ซ้ำกับคนอื่นไหม\n5. `prisma.category.update()` → คืน record ที่อัปเดตแล้ว\n\n**ทำไม PATCH ไม่ใช่ PUT**: PUT = ส่งข้อมูลมาทั้งหมดแล้ว replace เลย, PATCH = ส่งมาแค่ field ที่เปลี่ยน ระบบนี้ใช้ PATCH เพราะ frontend ไม่จำเป็นต้องส่ง field ทั้งหมดมาพร้อมกัน"
+    },
+    {
+      "file": "src/app/api/categories/[id]/route.ts",
+      "line": 50,
+      "title": "DELETE /api/categories/[id] — ลบพร้อมกันกั้น",
+      "description": "**สถานการณ์**: admin ต้องการลบหมวดหมู่ที่ไม่ใช้แล้ว\n\n**จุดสำคัญบรรทัด 55-61**: ก่อนลบต้องนับก่อนว่ามีเมนูในหมวดนี้ไหม\n```ts\ninclude: { _count: { select: { menus: true } } }\n```\nถ้ามีเมนูอยู่ → `throw conflict('ไม่สามารถลบ...')` → ป้องกันข้อมูลพัง\n\n**ทำไมไม่ onDelete: Cascade**: เพราะ Prisma schema กำหนด `onDelete: Restrict` บน Menu.categoryId แปลว่า database จะ error ถ้าพยายาม delete category ที่มี menu อยู่ — การเช็คก่อนทำให้ error message เป็นภาษาไทยที่อ่านรู้เรื่อง แทน Prisma error ดิบ\n\n**คืนค่า**: `{ id }` เพื่อให้ frontend รู้ว่า id ไหนถูกลบ"
+    },
+    {
+      "file": "src/components/ui/Button.tsx",
+      "line": 12,
+      "title": "Button — ปุ่มกดหลักของระบบ",
+      "description": "**สถานการณ์**: ระบบมีปุ่มหลายแบบ — ปุ่มหลัก, ปุ่มรอง, ปุ่มลบ, ปุ่มโปร่งใส ถ้าสร้างแยกกันทุกตัว style จะไม่สม่ำเสมอ\n\n**วิธีทำงาน**: ใช้ 2 lookup object แทน if/else:\n```ts\nvariantClasses['primary']  → สีน้ำตาล cafe-brown ตาม brand\nvariantClasses['danger']   → สีแดง สำหรับปุ่มลบ\nsizeClasses['lg']          → padding และ font ใหญ่ขึ้น\n```\n\n**จุดสำคัญบรรทัด 29**: ใช้ `forwardRef` เพื่อให้ parent component ส่ง ref เข้ามาได้ — จำเป็นสำหรับ form submit, focus management\n\n**isLoading**: บรรทัด 56-60 ถ้า isLoading=true จะแสดง spinner หมุน และ disabled อัตโนมัติ ป้องกัน double-submit\n\n**Accessibility**: บรรทัด 48 มี `focus-visible:ring` เพื่อแสดง outline เมื่อ navigate ด้วย keyboard (แต่ไม่แสดงตอนคลิก mouse)"
+    },
+    {
+      "file": "src/components/ui/Badge.tsx",
+      "line": 54,
+      "title": "OrderStatusBadge — ป้ายสถานะออเดอร์",
+      "description": "**สถานการณ์**: ออเดอร์มี 5 สถานะ (pending / preparing / ready / completed / cancelled) แต่ละสถานะต้องแสดงสีต่างกัน\n\n**วิธีทำงาน**: `orderStatusConfig` เป็น lookup object ที่ map status → ภาษาไทย + สี\n```ts\npending   → 'รอดำเนินการ' + สีเหลือง (warning)\npreparing → 'กำลังเตรียม' + สีฟ้า (info)\nready     → 'พร้อมเสิร์ฟ' + สีเขียว (success)\ncompelled → 'เสร็จสิ้น'  + สีเทา (neutral)\ncancelled → 'ยกเลิก'     + สีแดง (error)\n```\n\n**ทำไมดี**: ถ้าเพิ่ม status ใหม่ใน Prisma schema แล้วไม่อัป config นี้ → TypeScript จะ error บอกทันทีว่า key หาย เพราะ type เป็น `Record<OrderStatus, ...>`\n\n**ใช้งาน**: `<OrderStatusBadge status={order.status} />` — ไม่ต้องส่ง label หรือสีเอง"
+    },
+    {
+      "file": "src/components/ui/Modal.tsx",
+      "line": 24,
+      "title": "Modal — Popup ที่ใช้ <dialog> ของ browser จริงๆ",
+      "description": "**สถานการณ์**: ต้องการ popup สำหรับฟอร์มแก้ไข, ยืนยันลบ ฯลฯ\n\n**ทำไมใช้ `<dialog>` แทน `<div>`**: browser รองรับ native dialog element ซึ่งได้มาฟรี:\n- กัน Tab focus ออกไปนอก popup เอง\n- กด Esc ปิดได้เลย\n- `::backdrop` pseudo-element สำหรับ overlay\n- Accessibility role='dialog' ในตัว\n\n**useEffect บรรทัด 24**: sync สถานะ isOpen → เรียก `dialog.showModal()` หรือ `dialog.close()`\n\n**useEffect บรรทัด 34**: listen event 'close' จาก dialog — จำเป็นเพื่อ sync กลับมาหา parent เวลาผู้ใช้กด Esc\n\n**Backdrop click บรรทัด 52-62**: ใช้ `getBoundingClientRect()` เช็คว่า mouse click อยู่นอกกรอบ dialog จริงๆ ไม่ใช่บน child element ซึ่ง event bubbling จะทำให้ `e.target` ผิดพลาด"
+    },
+    {
+      "file": "src/components/ui/Skeleton.tsx",
+      "line": 5,
+      "title": "Skeleton & EmptyState — 2 สถานะที่คนมักลืม",
+      "description": "**Skeleton** — หน้าจอตอนกำลังโหลดข้อมูล\n- ใช้ Tailwind `animate-pulse` สร้าง shimmer effect\n- `aria-hidden='true'` เพราะ screen reader ไม่ควรอ่านสิ่งที่ยังไม่มีข้อมูล\n- มีแบบสำเร็จรูป 2 แบบ: `SkeletonCard` สำหรับ grid เมนู, `SkeletonRow` สำหรับ list\n\n**EmptyState** (ดูบรรทัด 8 ในไฟล์ EmptyState.tsx)\n— หน้าจอตอนไม่มีข้อมูลเลย:\n- icon (optional) แสดงใน circle สี cafe-brown\n- title + description\n- action slot — ส่ง Button เข้ามาเพื่อให้ผู้ใช้ทำอะไรต่อได้\n\n**ทำไม 2 ตัวนี้สำคัญ**: CLAUDE.md กำหนดว่าทุก feature ต้องผ่าน 5 states: Loading, Empty, Error, Success, Unauthorized — Skeleton กับ EmptyState คือตัวจัดการ 2 states แรก"
+    },
+    {
+      "title": "สรุป Phase 3 — ภาพรวม Data Flow",
+      "description": "เมื่อ frontend เรียก `GET /api/categories`:\n\n```\nrequest เข้ามา\n    ↓\n withHandler ครอบอยู่ (route-handler.ts)\n    ↓\n requireAuth → เช็ค Supabase session (api-auth.ts)\n    ↓ (ถ้าผ่าน)\n prisma.category.findMany() → ดึงข้อมูล\n    ↓\n successResponse(data) → { success:true, data:[...] } (api-response.ts)\n    ↓\n ส่งกลับ HTTP 200\n\n--- ถ้าเกิด error ---\n throw notFound()  ← สร้าง ApiError(404)\n    ↓\n withHandler catch → errorResponse(msg, 404)\n    ↓\n ส่งกลับ { success:false, error:'ไม่พบข้อมูล' }\n```\n\n**ขั้นต่อไป**: Phase 3 ยังเหลือ API routes สำหรับ menus, tables, orders และ POS main page ซึ่งจะใช้ UI components ทุกตัวในทัวร์นี้"
+    }
+  ]
+}

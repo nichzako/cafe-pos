@@ -1,0 +1,101 @@
+{
+  "$schema": "https://aka.ms/codetour-schema",
+  "title": "Phase 1 — รากฐานของระบบ Cafe POS",
+  "description": "ทัวร์นี้พาผ่าน 6 ไฟล์หลักของ Phase 1 ที่วางรากฐานทั้งหมดก่อนจะเขียน feature แรก — ตั้งแต่ dependencies ไปจนถึง domain model ใน Prisma",
+  "ref": "main",
+  "steps": [
+    {
+      "directory": ".",
+      "title": "ภาพรวม Project",
+      "description": "**จุดเริ่มต้น — รู้จัก Cafe POS**\n\nโปรเจกต์นี้คือระบบ Point of Sale สำหรับร้านกาแฟ สร้างด้วย Next.js 15 App Router บน Node.js 22\n\nโครงสร้างหลักที่ควรรู้จัก:\n- `prisma/` — schema + migration ของฐานข้อมูล\n- `src/app/` — pages และ API routes (Next.js App Router)\n- `src/lib/` — utility, validation, helpers ที่ใช้ร่วมกัน\n- `src/types/` — TypeScript types ทั้งหมด\n- `src/components/` — React components\n\nPhase 1 วางรากฐาน 3 ด้าน: **dependencies**, **config**, และ **domain model**"
+    },
+    {
+      "file": "package.json",
+      "line": 11,
+      "title": "Dependencies — เลือกอะไรมาบ้าง?",
+      "description": "**dependencies ถูกเลือกมาอย่างมีเหตุผล ไม่ใช่แค่ติดตั้งตามกระแส**\n\nกลุ่มหลักที่ต้องรู้จัก:\n- `next` 16.2.2 + `react` 19 — framework หลัก\n- `@supabase/ssr` + `@supabase/supabase-js` — Auth และ database connection ผ่าน Supabase\n- `prisma` + `@prisma/client` — ORM สำหรับ PostgreSQL\n- `zod` v4 — validation ทุก API route (Thai error messages)\n- `react-hook-form` + `@hookform/resolvers` — form state + Zod integration\n- `omise` — payment gateway หลัก (Thai fintech)\n- `promptpay-qr` — สร้าง QR PromptPay จาก open-source library\n- `lucide-react` — icon library เดียวที่อนุญาต\n\n**กฎสำคัญ:** ห้ามเพิ่ม library ใหม่โดยไม่ได้รับอนุมัติ — ดู CLAUDE.md"
+    },
+    {
+      "file": "package.json",
+      "line": 30,
+      "title": "DevDependencies — เครื่องมือ dev",
+      "description": "**toolchain ที่เลือกมาสำหรับ Type Safety และ Code Quality**\n\n- `tailwindcss` v4 — ใช้ CSS-based config (ไม่มี `tailwind.config.ts` แล้ว)\n- `@tailwindcss/postcss` — PostCSS plugin สำหรับ Tailwind v4\n- `eslint` v9 + `eslint-config-next` — linting รุ่นใหม่ (flat config)\n- `typescript` v5 — strict mode เปิดอยู่เสมอ\n- `dotenv` — โหลด `.env` ใน scripts ที่ไม่ได้ run ผ่าน Next.js\n\n⚠️ **สิ่งที่ไม่มีในโปรเจกต์นี้:** Redux, Zustand, Material UI, Axios — ห้ามเพิ่มเด็ดขาด"
+    },
+    {
+      "file": "eslint.config.mjs",
+      "line": 5,
+      "title": "ESLint — Flat Config (v9)",
+      "description": "**ESLint v9 ใช้ format ใหม่ที่เรียกว่า Flat Config — ไม่ใช่ `.eslintrc` แบบเดิม**\n\nไฟล์นี้ extend จาก 2 configs:\n- `nextVitals` — Core Web Vitals rules ของ Next.js\n- `nextTs` — TypeScript-specific rules\n\nสังเกต `globalIgnores` บรรทัด 9-16 — ตรงนี้บอกให้ ESLint ข้ามโฟลเดอร์ที่ generate มา โดยเฉพาะ `src/generated/**` ซึ่งคือ Prisma client ที่ generate ออกมา ถ้าไม่ ignore จะมี lint error จาก code ที่ Prisma สร้างให้เอง"
+    },
+    {
+      "file": "eslint.config.mjs",
+      "line": 18,
+      "title": "ESLint Rules — 2 กฎสำคัญ",
+      "description": "**2 กฎที่ enforce ได้ด้วย linter โดยตรง:**\n\n```js\n\"no-console\": \"error\"\n```\nป้องกัน `console.log` หลุดไปใน production ทุก `console.*` จะทำให้ `npm run lint` fail ทันที ถ้าต้องการ log จริงให้ใช้ `process.stderr.write()` หรือ logger library\n\n```js\n\"@typescript-eslint/no-explicit-any\": \"error\"\n```\nบังคับใช้ `unknown` แทน `any` — ทุกที่ที่ type ไม่แน่ใจให้ narrow ก่อนใช้ ไม่ใช่ shortcut ด้วย `any`\n\n**สรุป:** ถ้า lint pass หมายความว่าไม่มี console leak และไม่มี type escape"
+    },
+    {
+      "file": "next.config.ts",
+      "line": 13,
+      "title": "Security Headers — ป้องกัน Web Attacks",
+      "description": "**ทุก HTTP response ของ app จะมี 4 headers นี้โดยอัตโนมัติ**\n\n```\nX-Frame-Options: DENY\n```\nป้องกัน Clickjacking — ห้าม embed หน้าเว็บนี้ใน `<iframe>` ของเว็บอื่น\n\n```\nX-Content-Type-Options: nosniff\n```\nป้องกัน MIME sniffing — บังคับ browser ให้ใช้ Content-Type ที่ server ส่งมา ไม่ใช่ guess เอง\n\n```\nReferrer-Policy: strict-origin-when-cross-origin\n```\nจำกัดข้อมูลที่ส่งใน Referrer header เมื่อ navigate ออกนอก origin\n\n```\nPermissions-Policy: camera=(), microphone=(), geolocation=()\n```\nปิด browser APIs ที่ POS ไม่ต้องการ — ลดโอกาสถูก exploit"
+    },
+    {
+      "file": "next.config.ts",
+      "line": 4,
+      "title": "Image Domain — Supabase Storage เท่านั้น",
+      "description": "**Next.js Image component จะโหลดรูปจาก external domain ได้เฉพาะที่ whitelist ไว้**\n\nตรงนี้อนุญาตเฉพาะ `*.supabase.co` path `/storage/v1/object/public/**` — คือ Supabase Storage bucket ที่เปิด public เท่านั้น\n\nถ้าพยายามโหลดรูปจาก domain อื่น (เช่น CDN ภายนอก, imgur, etc.) Next.js จะ throw error ทันที นี่คือ defense-in-depth — บังคับให้รูปเมนูทุกอันต้องอยู่ใน storage ของโปรเจกต์เท่านั้น"
+    },
+    {
+      "file": "src/app/layout.tsx",
+      "line": 5,
+      "title": "Sarabun Font — Thai-first Typography",
+      "description": "**Root layout โหลด Sarabun ผ่าน `next/font/google` — ไม่ใช่ CSS `@import`**\n\nความแตกต่างสำคัญ:\n- `next/font` โหลด font ล่วงหน้าเป็น self-hosted ใน build time — ไม่มี flash of unstyled text\n- ใช้ `display: \"swap\"` — ระหว่าง font โหลด browser แสดง fallback font ก่อน ไม่ block render\n- `subsets: [\"thai\", \"latin\"]` — โหลดเฉพาะ character sets ที่ใช้ ประหยัด bandwidth\n- weights 300–700 ครอบคลุมทุกน้ำหนักที่ UI ต้องการ\n\nFont ถูก inject เป็น CSS variable `--font-sans` แล้วใช้ใน `globals.css`"
+    },
+    {
+      "file": "src/app/layout.tsx",
+      "line": 12,
+      "title": "Metadata + lang=\"th\"",
+      "description": "**2 จุดสำคัญที่ layout ทำ:**\n\n**1. metadata** (บรรทัด 12-15) — Next.js export นี้ generate `<title>` และ `<meta description>` ใน `<head>` อัตโนมัติ ทุก page สามารถ override ได้ด้วย `export const metadata` ของตัวเอง\n\n**2. `lang=\"th\"`** (บรรทัด 23) — บอก browser และ screen reader ว่า content หลักเป็นภาษาไทย สำคัญมากสำหรับ accessibility และ SEO\n\nสังเกต `className={\\`${sarabun.variable} h-full\\`}` บน `<html>` — inject CSS variable ของ font เข้า DOM tree ให้ทุก child component ใช้ได้ผ่าน `font-sans` class"
+    },
+    {
+      "file": "src/app/globals.css",
+      "line": 1,
+      "title": "Tailwind v4 — CSS-based Config",
+      "description": "**Tailwind CSS v4 เปลี่ยนวิธี config อย่างสิ้นเชิง — ไม่มี `tailwind.config.ts` แล้ว**\n\n`@import \"tailwindcss\"` บรรทัดแรกนี้แทนที่ `@tailwind base/components/utilities` แบบเดิมทั้งหมด\n\nต่อมาคือ `@theme { }` block — นี่คือหัวใจของ Tailwind v4 config ทั้งหมด ทุกอย่างที่เคยอยู่ใน `tailwind.config.ts` ย้ายมาเป็น CSS variables ใน block นี้\n\nสิ่งที่ define ใน `@theme` จะกลายเป็น Tailwind utility classes อัตโนมัติ เช่น `--color-cafe-brown-500` → ใช้ได้เป็น `bg-cafe-brown-500` หรือ `text-cafe-brown-500`"
+    },
+    {
+      "file": "src/app/globals.css",
+      "line": 6,
+      "title": "Cafe Brand Colors — Brown + Cream Palette",
+      "description": "**สีหลักของแบรนด์แบ่งเป็น 2 กลุ่ม:**\n\n**cafe-brown** (บรรทัด 7-16) — โทนสีน้ำตาลอุ่น ใช้สำหรับ primary UI elements, headers, buttons ตั้งแต่ 50 (อ่อนมาก) จนถึง 900 (เข้มมาก)\n\n**cafe-cream** (บรรทัด 18-22) — โทนครีมอ่อน ใช้สำหรับ background, card surfaces ตั้งแต่ 50 ถึง 300\n\n⚠️ **กฎห้ามลืม:** ห้าม hardcode hex color ใน component เด็ดขาด ต้องใช้ `bg-cafe-brown-600` ไม่ใช่ `bg-[#a18072]` เพราะถ้า rebrand ทีหลัง แก้ที่เดียวตรงนี้จบเลย"
+    },
+    {
+      "file": "src/app/globals.css",
+      "line": 23,
+      "title": "Status Colors — สีสถานะออเดอร์",
+      "description": "**5 สีนี้ map ตรงกับ `OrderStatus` enum ใน Prisma schema**\n\n```\npending   → amber    (รอดำเนินการ)\npreparing → blue     (กำลังทำ)\nready     → emerald  (พร้อมเสิร์ฟ)\ncompleted → gray     (เสร็จแล้ว)\ncancelled → red      (ยกเลิก)\n```\n\nออกแบบมาให้ชัดเจนทันตาสำหรับพนักงานที่ต้องมองจอ POS tablet ในร้านที่มีแสงสว่างหลากหลาย สีเหล่านี้จะปรากฏบน barista board (real-time order status) และ order panel"
+    },
+    {
+      "file": "prisma/schema.prisma",
+      "line": 14,
+      "title": "Enums — ภาษากลางของ Domain",
+      "description": "**5 enums นี้ mirror กับ TypeScript types ใน `src/types/index.ts` ทุกตัว**\n\n- `Role` — cashier / barista / admin (ควบคุม permission ทุก API route)\n- `OrderStatus` — วงจรชีวิตของออเดอร์ตั้งแต่ pending จนถึง completed/cancelled\n- `PaymentMethod` — cash / promptpay / card / mockup (mockup ใช้ตอน dev)\n- `PaymentStatus` — สถานะการชำระเงิน\n- `TableStatus` — available / occupied / reserved\n\n**ทำไม enum ใน Prisma ไม่ใช่แค่ string?** เพราะ PostgreSQL enforce ค่าที่ valid ระดับ database ไม่ใช่แค่ application level — ถ้า bug ส่งค่าผิดมา DB จะ reject ทันที"
+    },
+    {
+      "file": "prisma/schema.prisma",
+      "line": 112,
+      "title": "Order Model — ศูนย์กลางของ Domain",
+      "description": "**`Order` คือ entity หลักที่ทุกอย่างในระบบ revolve รอบ**\n\nความสัมพันธ์:\n- `tableId?` → `Table` (nullable — รองรับ takeout ที่ไม่มีโต๊ะ)\n- `staffId` → `Staff` (Restrict — ลบ staff ที่มี orders ไม่ได้)\n- `items` → `OrderItem[]` (Cascade — ลบ order = ลบ items ทั้งหมด)\n- `payment?` → `Payment` (1:1)\n- `receipt?` → `Receipt` (1:1)\n\nMonetary fields ใช้ `Decimal @db.Decimal(10,2)` ทั้งหมด — ไม่ใช่ Float เพราะ Float มี floating-point precision error ซึ่งอันตรายมากกับเงิน\n\nIndexes ที่ design มา: `[status, createdAt]` สำหรับ barista board query, `[createdAt]` สำหรับ order number generation"
+    },
+    {
+      "file": "prisma/schema.prisma",
+      "line": 158,
+      "title": "Payment + Receipt — Chain ที่ต้องรักษาไว้",
+      "description": "**Payment และ Receipt เป็น audit chain — ห้ามลบเด็ดขาด**\n\n`Payment` (บรรทัด 158):\n- `orderId @unique` — 1 order มีได้ 1 payment เท่านั้น\n- `gatewayRef?` + `gatewayMeta Json?` — เก็บ response จาก Omise / PromptPay\n- `paidAt?` — null จนกว่าจะชำระสำเร็จ\n- cascade rule: `Restrict` ทั้งคู่ — ลบ order/staff ที่มี payment ไม่ได้\n\n`Receipt` (บรรทัด 180):\n- `data Json` — snapshot ข้อมูลทั้งหมด ณ เวลาออกใบเสร็จ (ป้องกัน data drift)\n- cascade rule: `Restrict` ทั้งคู่ — ใบเสร็จต้องคงอยู่ตลอดไปเพื่อการตรวจสอบ\n\n**สรุป flow:** Order → Payment (จ่ายเงิน) → Receipt (สร้างใบเสร็จ) เป็น chain ทิศทางเดียว ไม่สามารถย้อนกลับได้"
+    },
+    {
+      "title": "Phase 1 ครบแล้ว — ก้าวต่อไปคือ Phase 2",
+      "description": "**ตอนนี้คุณมีรากฐานครบ 3 ด้านแล้ว:**\n\n✅ **Dependencies** — library ทุกตัวถูกเลือกมาอย่างมีเหตุผล ห้ามเพิ่มโดยไม่ได้รับอนุมัติ\n\n✅ **Config** — security headers, image domain whitelist, ESLint rules บังคับ type safety\n\n✅ **Domain Model** — 8 models, 5 enums, cascade rules ที่ป้องกัน audit data สูญหาย\n\n---\n\n**Phase 2 สร้างอะไรบ้าง?** (มีอยู่แล้วในโปรเจกต์)\n- `src/lib/prisma.ts` — Prisma singleton\n- `src/lib/order-number.ts` — สร้างเลขออเดอร์ ORD-YYYYMMDD-NNN (Bangkok timezone)\n- `src/types/index.ts` — TypeScript types ทั้งหมด\n- `src/lib/validations/` — Zod schemas ทุก resource\n- `src/lib/api-error.ts` / `api-response.ts` / `route-handler.ts` — API infrastructure\n\nดู tour `new-joiner-phase2-core-lib` สำหรับ Phase 2"
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://aka.ms/codetour-schema",
+  "title": "Phase 8 — Realtime Order Updates",
+  "description": "อธิบายกลไก Supabase Realtime ตั้งแต่ต้นจนจบ: ทำไมต้องทำ → ข้อมูลมาจากไหน → hook ทำงานยังไง → UI บอก user ยังไง",
+  "ref": "main",
+  "steps": [
+    {
+      "directory": "src/hooks",
+      "title": "1. ภาพรวม — Realtime คืออะไร และทำไมต้องทำ",
+      "description": "ก่อน Phase 8 หน้า Orders ดึงข้อมูลแค่ตอนโหลดหน้าครั้งแรก ถ้า barista เปลี่ยนสถานะออเดอร์ พนักงานแคชเชียร์จะไม่รู้เลยจนกว่าจะ refresh หน้าเอง\n\nPhase 8 แก้ปัญหานี้ด้วย **Supabase Realtime** — บริการ WebSocket ที่คอยฟัง database เมื่อมี INSERT หรือ UPDATE บน orders table → ส่ง event มาที่ browser → browser เรียก `router.refresh()` → Next.js re-run Server Component → ดึงข้อมูลใหม่จาก DB → UI อัปเดตอัตโนมัติ\n\nสั้นๆ: **DB เปลี่ยน → Supabase แจ้ง → Browser refresh → UI ใหม่** ทุกอย่างอัตโนมัติโดยไม่ต้อง reload หน้า"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/page.tsx",
+      "line": 13,
+      "title": "2. จุดเริ่มต้น — Server Component ดึงข้อมูลครั้งแรก",
+      "description": "`OrdersPage` เป็น **async Server Component** — รันบน server ทุกครั้งที่ Next.js render หน้านี้\n\nสังเกตบรรทัด 20: admin เห็น order ทุกสถานะ, พนักงานทั่วไปเห็นแค่ `ACTIVE_ORDER_STATUSES` (pending/preparing/ready)\n\nข้อมูลที่ได้จาก Prisma จะถูก serialize (Decimal→number, Date→ISO string ที่บรรทัด 36-40) ก่อนส่งผ่าน props ไปยัง Client Component\n\n**Gotcha**: ทุกครั้งที่ `router.refresh()` ถูกเรียก ฟังก์ชันนี้จะรันใหม่ตั้งแต่ต้น — นั่นคือ source of truth ทั้งหมดอยู่ที่ DB ไม่ใช่ client state"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/_components/OrderListClient.tsx",
+      "line": 49,
+      "title": "3. Client Component — เชื่อม hook เข้ากับ UI",
+      "description": "บรรทัด 49 คือจุดที่ `OrderListClient` เรียก `useOrdersRealtime()` ซึ่ง return มาแค่สองค่า:\n\n- `realtimeStatus` — บอกสถานะการเชื่อมต่อ (connecting/live/error)\n- `isRefreshing` — true ตอนที่กำลัง refresh อยู่ (ใช้แสดง opacity-70)\n\nHook นี้ไม่ return ข้อมูล orders เลย — data ยังคงมาจาก Server Component ผ่าน `orders` prop เหมือนเดิม hook มีหน้าที่แค่ **trigger refresh** เมื่อ DB เปลี่ยน"
+    },
+    {
+      "file": "src/lib/supabase/client.ts",
+      "line": 11,
+      "title": "4. Browser Supabase Client — ทำไมต้องใช้ client.ts ไม่ใช่ server.ts",
+      "description": "`createBrowserClient` จาก `@supabase/ssr` สร้าง client ที่รันใน browser — เชื่อมต่อ WebSocket ได้\n\nถ้าใช้ `server.ts` แทน จะ error เพราะ server client ไม่รองรับ Realtime subscription (WebSocket เป็น browser-only protocol)\n\nClient นี้ใช้ `NEXT_PUBLIC_SUPABASE_ANON_KEY` — public key ที่ browser เห็นได้ปกติ สิทธิ์จริงๆ ถูกควบคุมโดย **Row Level Security (RLS)** ใน Supabase ไม่ใช่ key"
+    },
+    {
+      "file": "src/hooks/useOrdersRealtime.ts",
+      "line": 3,
+      "title": "5. JSDoc — Prerequisites ที่ต้องทำก่อน Deploy",
+      "description": "Comment บล็อกนี้สำคัญมาก มี 2 prerequisite ที่ต้องทำใน Supabase Dashboard ก่อน feature นี้จะทำงาน:\n\n**1. Enable RLS** (Security): ถ้าไม่เปิด พนักงานทุกคนจะรับ event ของ order ทุกรายการในระบบโดยไม่กรอง role — เป็น information disclosure\n\n**2. เปิด Realtime Publication** (Infrastructure): ถ้าไม่เปิด hook จะ subscribe ได้ปกติ แต่ไม่มี event เข้าเลย — bug ที่ debug ยากมากเพราะ status จะแสดงเป็น 'live' ทั้งที่ไม่ได้รับอะไร (hook version ปัจจุบันจัดการด้วย 10s timeout)"
+    },
+    {
+      "file": "src/hooks/useOrdersRealtime.ts",
+      "line": 26,
+      "title": "6. RealtimeStatus — State Machine มี 3 สถานะ",
+      "description": "`RealtimeStatus = \"connecting\" | \"live\" | \"error\"` เป็น type ที่ export ออกมาด้วย เพื่อให้ `RealtimeBadge` import ใช้โดยตรงแทนที่จะ copy-paste union\n\nการเดินทางของ status:\n- เริ่มที่ `\"connecting\"` เสมอ (default state ใน useState)\n- `\"SUBSCRIBED\"` callback → เปลี่ยนเป็น `\"live\"`\n- `\"CHANNEL_ERROR\"` / `\"TIMED_OUT\"` / `\"CLOSED\"` → เปลี่ยนเป็น `\"error\"`\n- 10 วินาทีผ่านไปแต่ยังค้างที่ connecting → เปลี่ยนเป็น `\"error\"` อัตโนมัติ\n\nSubabase SDK จะ retry อัตโนมัติหลัง error ด้วย exponential backoff — ถ้า reconnect สำเร็จจะกลับมาเป็น `\"live\"` เอง"
+    },
+    {
+      "file": "src/hooks/useOrdersRealtime.ts",
+      "line": 28,
+      "title": "7. Constants — ตัวเลขมาจากไหน",
+      "description": "สองค่านี้ถูก extract ออกมาเป็น named constants แทนที่จะ hardcode ใน effect:\n\n- `REFRESH_DEBOUNCE_MS = 300` — barista update 3 ออเดอร์ติดกัน ให้รอ 300ms แล้วค่อย refresh ครั้งเดียว แทนที่จะ refresh 3 รอบ (ลด DB load)\n- `CONNECT_TIMEOUT_MS = 10_000` — ถ้า Realtime publication ยังไม่ได้เปิด hook จะไม่มีทางรู้ เพราะ subscribe API ไม่ throw error ใช้ timeout แทนเพื่อ detect silent failure\n\nทั้งสองค่านี้ช่วยให้ tune performance ได้โดยไม่ต้องไล่ค้นหาใน effect"
+    },
+    {
+      "file": "src/hooks/useOrdersRealtime.ts",
+      "line": 40,
+      "title": "8. routerRef Pattern — ทำไมไม่ใส่ router ใน deps",
+      "description": "นี่คือ pattern ที่อาจดูแปลก: `router` อยู่ใน `useRef` แทนที่จะใส่ใน deps array\n\n**ปัญหา**: ถ้าใส่ `[router]` ใน deps → effect จะ re-run (และ re-subscribe) ทุกครั้งที่ router reference เปลี่ยน แม้ Next.js 15 จะ guarantee ว่า router stable แต่ก็ไม่ได้ documented เป็น public API\n\n**วิธีแก้**: เก็บ router ใน `routerRef` แล้วอัปเดตผ่าน `useEffect([router])` แยก ส่วน main effect ใช้ `[]` (empty deps) = รันครั้งเดียวตอน mount\n\nCallback ใน channel เข้าถึง router ล่าสุดผ่าน `routerRef.current.refresh()` เสมอ ไม่ติด stale closure"
+    },
+    {
+      "file": "src/hooks/useOrdersRealtime.ts",
+      "line": 62,
+      "title": "9. UUID Channel Name — ป้องกัน Strict Mode Bug",
+      "description": "`crypto.randomUUID()` สร้างชื่อ channel unique ต่อ mount — ดูเหมือนเกินจำเป็น แต่แก้ปัญหา real ที่เกิดใน dev:\n\n**React Strict Mode** (dev only) mount → unmount → mount component 2 รอบ ถ้าทั้งสองรอบใช้ชื่อ `\"orders-realtime\"` เหมือนกัน:\n- Supabase client เห็นว่าชื่อซ้ำ → join channel เดิม\n- Cleanup ของรอบแรก call `removeChannel()` → ลบ channel ที่รอบสองกำลังใช้งานออกด้วย\n- ผลลัพธ์: badge แสดง \"Live\" แต่ไม่รับ event ใดๆ เลย (silent bug)\n\nด้วย UUID แต่ละ mount ได้ channel ของตัวเอง cleanup ลบได้แค่ channel ของตัวเองเท่านั้น"
+    },
+    {
+      "file": "src/hooks/useOrdersRealtime.ts",
+      "line": 64,
+      "title": "10. Channel Subscribe — กลไกหลักของ Realtime",
+      "description": "นี่คือหัวใจของ Phase 8 — 4 บรรทัดที่ทำงานสำคัญมาก:\n\n```\nsupabase.channel(channelName)\n  .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, callback)\n  .subscribe(statusCallback)\n```\n\n- `event: '*'` = รับทั้ง INSERT (ออเดอร์ใหม่) + UPDATE (สถานะเปลี่ยน)\n- `schema: 'public', table: 'orders'` = ฟังเฉพาะ orders table\n- เมื่อ event มาถึง callback จะ **ไม่ใช้ payload** เลย แค่ trigger `router.refresh()` — ดึงข้อมูลใหม่จาก DB แทน ปลอดภัยและ consistent กว่าการ merge payload เข้า client state"
+    },
+    {
+      "file": "src/hooks/useOrdersRealtime.ts",
+      "line": 70,
+      "title": "11. Debounce — batch rapid events ก่อน refresh",
+      "description": "ช่วง busy hour barista อาจ mark 5 ออเดอร์ติดกันใน 1 วินาที ถ้าไม่มี debounce → `router.refresh()` ถูกเรียก 5 ครั้ง → 5 Prisma queries → 5 full Server Component re-renders\n\n**วิธีทำงาน**: ทุก event ที่เข้ามา clear timer เดิมแล้วตั้งใหม่ 300ms ถ้า event หยุดเข้า 300ms จะ refresh ครั้งเดียว ถ้า event ยังเข้าอยู่ก็รอต่อ\n\n`startTransition()` ห่อ `router.refresh()` อีกชั้น — ทำให้ React รู้ว่า re-render นี้ไม่ urgent UI ยังคง interactive ระหว่างรอข้อมูลใหม่ (ไม่ freeze)"
+    },
+    {
+      "file": "src/hooks/useOrdersRealtime.ts",
+      "line": 80,
+      "title": "12. Subscribe Callback — State Machine เต็มรูปแบบ",
+      "description": "Supabase ส่ง subscription status กลับมาหลาย event — hook handle ทุกกรณีครบ:\n\n- `SUBSCRIBED` → clear timeout + set `\"live\"` (success path)\n- `CHANNEL_ERROR` → Supabase จะ retry อัตโนมัติ แต่ user ต้องรู้ว่ามีปัญหา\n- `TIMED_OUT` → network ช้า / Supabase busy — จะ retry เอง\n- `CLOSED` → connection ถูกตัดโดยตั้งใจ (เช่น server restart)\n\nทั้ง ERROR + TIMED_OUT + CLOSED → set `\"error\"` เพื่อแสดง badge สีแดง\n\nComment บรรทัด 93 สำคัญ: Supabase SDK มี built-in exponential backoff ไม่ต้องเขียน retry เอง ถ้า reconnect สำเร็จ SDK จะ fire `SUBSCRIBED` อีกครั้ง → status กลับเป็น `\"live\"` เอง"
+    },
+    {
+      "file": "src/hooks/useOrdersRealtime.ts",
+      "line": 96,
+      "title": "13. Cleanup — ป้องกัน Memory Leak",
+      "description": "React เรียก cleanup function นี้ 2 กรณี:\n1. Component unmount (user navigate ออกจากหน้า Orders)\n2. React Strict Mode double-invoke ใน development\n\nต้อง clear ทั้ง 3 อย่าง:\n- `connectTimer` — ถ้าไม่ clear แล้ว component unmount ก่อน 10s timer fire → `setStatus()` ถูกเรียกบน unmounted component\n- `debounceTimer` — event ที่ค้างอยู่ใน queue จะไม่ถูก flush หลัง unmount\n- `supabase.removeChannel(channel)` — ปิด WebSocket subscription และลบ channel ออกจาก Supabase client pool"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/_components/RealtimeBadge.tsx",
+      "line": 11,
+      "title": "14. RealtimeBadge — UI บอก User ว่าระบบอยู่ในสถานะไหน",
+      "description": "Component แยกไฟล์ที่ render แต่ละ state ของ RealtimeStatus:\n\n- **isRefreshing** (บรรทัด 12) — spinner + \"กำลังอัปเดต…\" แสดงตอน `router.refresh()` กำลัง in-flight\n- **live** (บรรทัด 21) — จุดเขียวกระพริบ + \"Live\" บอกว่า WebSocket connected\n- **error** (บรรทัด 42) — WifiOff icon + \"ออฟไลน์\" บอกว่าขาดการเชื่อมต่อ\n- **connecting** (บรรทัด 54) — Wifi icon + \"กำลังเชื่อมต่อ…\" สถานะเริ่มต้น\n\nทุก state ใช้ `aria-label` แทน `title` — เพราะ `title` tooltip ใช้งานไม่ได้บน mobile/tablet (primary device ของ POS) ส่วน decorative icons ทุกตัวมี `aria-hidden=\"true\"`"
+    },
+    {
+      "file": "src/app/(dashboard)/orders/_components/OrderListClient.tsx",
+      "line": 71,
+      "title": "15. aria-live — Screen Reader ประกาศ Status Change อัตโนมัติ",
+      "description": "Badge อยู่ใน `<div aria-live=\"polite\" aria-atomic=\"true\">` เสมอ ทำให้เมื่อ status เปลี่ยน (connecting → live / live → error) screen reader จะอ่านข้อความใหม่ให้ผู้ใช้ฟัง\n\n- `aria-live=\"polite\"` = รอให้ผู้ใช้หยุดพิมพ์/พูดก่อน แล้วค่อยประกาศ (ไม่ interrupt)\n- `aria-atomic=\"true\"` = ประกาศทั้ง badge ใหม่ ไม่ใช่แค่ส่วนที่เปลี่ยน\n\nบรรทัด 123 มี `aria-busy={isRefreshing}` บน tabpanel ด้วย — บอก assistive technology ว่า region กำลังโหลดอยู่ (ไม่ใช่แค่ opacity ที่คนตาพร่าเห็นไม่ชัด)"
+    },
+    {
+      "title": "16. สรุป — Data Flow ทั้งหมด",
+      "description": "ย้อนมองภาพรวมทั้งหมดของ Phase 8:\n\n```\n[DB Change] (Prisma PATCH via API)\n    ↓ postgres_changes event\n[Supabase Realtime WebSocket]\n    ↓ fires callback in useOrdersRealtime\n[Debounce 300ms]\n    ↓ coalesce rapid events\n[startTransition → router.refresh()]\n    ↓ non-urgent React re-render\n[Next.js Server Component re-runs]\n    ↓ fresh Prisma query\n[OrdersPage → OrderListClient props]\n    ↓ new data flows down\n[UI updates automatically]\n```\n\n**ข้อดีของ pattern นี้**: ไม่มี duplicate state ใน client, ข้อมูลมาจาก DB เสมอ, ไม่มี sync bug\n\n**ข้อจำกัด**: refresh ครั้งละ full query (100 rows) ถ้า traffic สูงมากควรพิจารณา optimistic updates ใน future phase\n\n**Next**: อ่าน `src/app/api/orders/[id]/route.ts` เพื่อดูว่า PATCH endpoint ที่ trigger event นี้ทำงานยังไง"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-turbopack --yes)",
+      "Read(//c/Users/nichchanp/Desktop/TestClaude/Code/**)",
+      "Bash(npx create-next-app@latest cafe-pos-temp --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-turbopack --yes)",
+      "Bash(robocopy \"C:\\\\Users\\\\nichchanp\\\\Desktop\\\\TestClaude\\\\Code\\\\cafe-pos-temp\" \"C:\\\\Users\\\\nichchanp\\\\Desktop\\\\TestClaude\\\\Code\\\\cafe-pos\" /E /XF CLAUDE.md)",
+      "Bash(powershell -Command \":*)",
+      "Bash(npm install:*)",
+      "Bash(npx prisma:*)",
+      "Bash(npm run:*)",
+      "Bash(node -e \"const p=require\\(''./package.json''\\); console.log\\(''name:'', p.name\\); console.log\\(''version:'', p.version\\)\")",
+      "Bash(find /c/Users/nichchanp/Desktop/TestClaude/Code/cafe-pos/src/lib -type f -name *.ts)",
+      "Bash(find . -name *.log)",
+      "Bash(find /c/Users/nichchanp/Desktop/TestClaude/Code/cafe-pos -name *.ts -path */src/* -type f)",
+      "Bash(xargs wc:*)",
+      "Bash(find /c/Users/nichchanp/Desktop/TestClaude/Code/cafe-pos/src -type f \\\\\\(-name *.ts -o -name *.tsx \\\\\\))",
+      "Bash(xargs grep:*)",
+      "Bash(python3 -c \" import sys, json lines = sys.stdin.read\\(\\).strip\\(\\).split\\('\\\\n'\\) for line in lines[-20:]: try: data = json.loads\\(line\\) role = data.get\\('role', ''\\) content = data.get\\('content', ''\\) if isinstance\\(content, list\\): for item in content: if isinstance\\(item, dict\\) and item.get\\('type'\\) == 'text': print\\(f'[{role}]: {item[\\\\\"text\\\\\"][:500]}'\\) break elif isinstance\\(content, str\\): print\\(f'[{role}]: {content[:500]}'\\) except: pass \")",
+      "Bash(node -e ':*)",
+      "Bash(mkdir -p \"C:\\\\Users\\\\nichchanp\\\\Desktop\\\\TestClaude\\\\Code\\\\cafe-pos\\\\src\\\\app\\\\api\\\\categories\\\\[id]\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\nichchanp\\\\Desktop\\\\TestClaude\\\\Code\\\\cafe-pos\\\\src\\\\app\\\\api\\\\menus\\\\[id]\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\nichchanp\\\\Desktop\\\\TestClaude\\\\Code\\\\cafe-pos\\\\src\\\\app\\\\api\\\\tables\\\\[id]\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\nichchanp\\\\Desktop\\\\TestClaude\\\\Code\\\\cafe-pos\\\\src\\\\app\\\\api\\\\orders\\\\[id]\")",
+      "Bash(grep -n 'transaction\\\\|$transaction' 'C:\\\\Users\\\\nichchanp\\\\Desktop\\\\TestClaude\\\\Code\\\\cafe-pos\\\\src\\\\app\\\\api\\\\orders\\\\route.ts')",
+      "Bash(ls /c/Users/nichchanp/Desktop/TestClaude/Code/cafe-pos/src/app/api/orders/[id]/)",
+      "Bash(not exist:*)",
+      "Bash(grep -E \"\\\\.\\(tsx?|json|md|prisma|env\\)$\")",
+      "Bash(wc -l ./src/app/api/payment/*/*.ts)",
+      "Bash(grep -E \"\\\\.ts$|^d\")",
+      "Bash(npm audit:*)",
+      "Bash(grep -A5 -B5 \"status.*available\\\\|available.*status\" /c/Users/nichchanp/Desktop/TestClaude/Code/cafe-pos/src/app/api/tables/[id]/route.ts)",
+      "Bash(grep -A20 \"status.*completed\\\\|status.*cancelled\" /c/Users/nichchanp/Desktop/TestClaude/Code/cafe-pos/src/app/api/orders/[id]/route.ts)",
+      "Bash(grep -n \"prisma.order.update\\\\|prisma.table.update\" /c/Users/nichchanp/Desktop/TestClaude/Code/cafe-pos/src/app/api/orders/[id]/route.ts)",
+      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\('next:', p.dependencies.next\\)\")",
+      "Bash(npm test:*)",
+      "Bash(grep -v \"^$\")"
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+-- ============================================================
+-- Cafe POS — Supabase Realtime Setup
+-- ============================================================
+-- วิธีใช้: วาง SQL นี้ใน Supabase Dashboard > SQL Editor แล้วกด Run
+--
+-- ทำไมต้องทำ:
+--   useOrdersRealtime hook ใน src/hooks/useOrdersRealtime.ts
+--   subscribe ไปที่ orders table — ถ้าไม่ enable Realtime จะ timeout
+--   และ RealtimeBadge จะแสดง "error" state แทน "live"
+-- ============================================================
+
+-- ---- Enable Realtime publication สำหรับ orders table ----------------------
+--
+-- Supabase ใช้ PostgreSQL publication ชื่อ "supabase_realtime"
+-- ต้อง add table เข้า publication ก่อน Realtime จะทำงาน
+--
+-- หมายเหตุ: ต้องเปิด RLS ก่อน (prisma/rls-setup.sql) —
+--   ถ้า RLS ไม่เปิด Realtime จะส่ง events ของทุก row ให้ทุก client
+--   ซึ่งเป็น security risk
+
+ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;
+
+-- ---- ตรวจสอบว่า publication ทำงานแล้ว ------------------------------------
+--
+-- SELECT pubname, tablename
+-- FROM pg_publication_tables
+-- WHERE pubname = 'supabase_realtime'
+-- ORDER BY tablename;
+--
+-- ควรเห็น orders อยู่ในรายการ
+
+-- ============================================================
+-- ทางเลือก: GUI แทน SQL
+-- ============================================================
+-- ถ้าไม่อยากรัน SQL สามารถทำผ่าน Dashboard ได้:
+--
+-- 1. ไปที่ Supabase Dashboard
+-- 2. เลือก Project > Database > Replication
+-- 3. หัวข้อ "Supabase Realtime" คลิก "0 tables"
+-- 4. Toggle ON ที่ "orders"
+-- 5. Save
+--
+-- ทั้งสองวิธีให้ผลเหมือนกัน
+-- ============================================================
+
+-- ============================================================
+-- หมายเหตุสำหรับ FILTER ใน Realtime (Advanced)
+-- ============================================================
+-- ถ้าต้องการให้ cashier/barista เห็นเฉพาะ orders ของวันนี้
+-- หรือ filter ตาม status สามารถเพิ่ม filter ใน hook ได้:
+--
+-- ตัวอย่าง filter ใน useOrdersRealtime.ts:
+--   .on('postgres_changes', {
+--     event: '*',
+--     schema: 'public',
+--     table: 'orders',
+--     filter: 'status=neq.completed'  -- เฉพาะ active orders
+--   }, callback)
+--
+-- ตอนนี้ hook subscribe ทุก event ซึ่ง OK สำหรับ MVP
+-- ============================================================

@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Sarabun", ui-sans-serif, system-ui, sans-serif;
+
+  /* Cafe brand colors */
+  --color-cafe-brown-50: #fdf8f6;
+  --color-cafe-brown-100: #f2e8e5;
+  --color-cafe-brown-200: #eaddd7;
+  --color-cafe-brown-300: #e0cec7;
+  --color-cafe-brown-400: #d2bab0;
+  --color-cafe-brown-500: #bfa094;
+  --color-cafe-brown-600: #a18072;
+  --color-cafe-brown-700: #977669;
+  --color-cafe-brown-800: #65524a;
+  --color-cafe-brown-900: #43302b;
+
+  --color-cafe-cream-50: #fffdf7;
+  --color-cafe-cream-100: #fef9e7;
+  --color-cafe-cream-200: #fdf0c2;
+  --color-cafe-cream-300: #fce49a;
+
+  /* Status colors */
+  --color-status-pending: #f59e0b;
+  --color-status-preparing: #3b82f6;
+  --color-status-ready: #10b981;
+  --color-status-completed: #6b7280;
+  --color-status-cancelled: #ef4444;
+}
+
+:root {
+  --background: #fffdf7;
+  --foreground: #1a1008;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1a1008;
+    --foreground: #fdf8f6;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}

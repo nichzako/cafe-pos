@@ -1,0 +1,130 @@
+{
+  "$schema": "https://aka.ms/codetour-schema",
+  "title": "Phase 2 — Core Library (DB, Types, Validation, API Infrastructure)",
+  "description": "ทัวร์นี้พาผ่าน src/lib/ และ src/types/ ทั้งหมดของ Phase 2 ซึ่งเป็นชั้น infrastructure ที่ทุก API route และ component จะต้องพึ่งพา ก่อนจะเขียน feature แรกต้องเข้าใจชั้นนี้ก่อน",
+  "ref": "main",
+  "steps": [
+    {
+      "directory": "src/lib",
+      "title": "src/lib — ชั้น Infrastructure",
+      "description": "**`src/lib/` คือ shared utilities ที่ทุกส่วนของ app ใช้ร่วมกัน**\n\nแบ่งเป็น 2 กลุ่มชัดเจน:\n\n**กลุ่ม Database**\n- `prisma.ts` — Prisma client singleton\n- `order-number.ts` — สร้างเลขออเดอร์/ใบเสร็จ\n\n**กลุ่ม API Infrastructure**\n- `api-error.ts` — structured error class\n- `api-response.ts` — response builder helpers\n- `route-handler.ts` — try-catch wrapper สำหรับทุก route\n- `api-auth.ts` — auth + role checker (stub รอ Phase 3)\n\n**กลุ่ม Validation** (อยู่ใน `lib/validations/`)\n- 5 schema files ครอบคลุมทุก domain entity\n\nทุก API route จะ import จาก lib/ เกือบทั้งหมด — เข้าใจที่นี่ก่อน เขียน route ได้เลย"
+    },
+    {
+      "file": "src/lib/prisma.ts",
+      "line": 1,
+      "title": "Prisma Singleton — ทำไมถึงต้อง globalThis?",
+      "description": "**ปัญหาที่ไฟล์นี้แก้: Next.js hot-reload สร้าง PrismaClient ใหม่ทุกครั้งที่ไฟล์เปลี่ยน**\n\nถ้าไม่มี singleton แต่ละ hot-reload จะ spawn PrismaClient instance ใหม่ ทำให้ connection pool exhausted อย่างรวดเร็วในช่วง dev\n\n**วิธีแก้:** ผูก client ไว้กับ `globalThis` ซึ่ง survive ข้าม module re-evaluation ได้ โดย cache เฉพาะใน development (`NODE_ENV !== \"production\"`) เท่านั้น\n\nใน production (Vercel) แต่ละ serverless function instance สร้าง client ครั้งเดียวตลอดอายุของมัน ไม่ต้อง cache\n\n**กฎที่ต้องจำ:** `import { prisma } from \"@/lib/prisma\"` เท่านั้น — ห้าม `new PrismaClient()` ที่อื่น"
+    },
+    {
+      "file": "src/lib/prisma.ts",
+      "line": 20,
+      "title": "Prisma Logging — dev vs production",
+      "description": "**Logging ถูก configure ต่างกันตาม environment โดยตั้งใจ:**\n\nใน `development` → log `[\"query\", \"error\", \"warn\"]`\n- เห็น SQL query ทุกตัวที่ยิงไป DB — ช่วย debug N+1 และ slow queries\n\nใน `production` → log `[\"error\"]` เท่านั้น\n- ไม่ให้ query log ปนกับ Vercel log (ค่าใช้จ่ายและ noise)\n- error ยังต้องการ log เพื่อ monitor\n\nไม่ต้องแตะไฟล์นี้อีก เว้นแต่จะเพิ่ม log level สำหรับ debugging เฉพาะกิจ"
+    },
+    {
+      "file": "src/lib/order-number.ts",
+      "line": 5,
+      "title": "Bangkok Timezone — UTC+7 แบบ explicit",
+      "description": "**ทำไมต้อง hardcode offset แทนที่จะใช้ `new Date()` ตรงๆ?**\n\nVERCEL default timezone คือ UTC — `new Date()` ที่ Bangkok 00:30 น. จะคืน UTC 17:30 ของวันก่อน ออเดอร์แรกของวันใหม่จะได้เลข `ORD-20260406-NNN` ทั้งที่ควรเป็น `ORD-20260407-NNN`\n\n```js\nconst BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000; // UTC+7\n```\n\nOffest นี้ hardcode ตั้งใจ — ไม่ใช้ library date-fns-tz เพื่อไม่เพิ่ม dependency ไทยไม่มี DST (Daylight Saving Time) ดังนั้น +7 คงที่ตลอดปี\n\nฟังก์ชัน `nowInBangkok()` และ `startOfBangkokDayInUtc()` ใช้ UTC methods ทั้งหมดหลังจาก offset แล้ว"
+    },
+    {
+      "file": "src/lib/order-number.ts",
+      "line": 43,
+      "title": "generateOrderNumber — Race Condition Caveat",
+      "description": "**ฟังก์ชันนี้ใช้ pattern count-then-construct ซึ่งมี edge case สำคัญ**\n\nขั้นตอน:\n1. นับ orders ของวันนี้ → ได้ N\n2. return `ORD-YYYYMMDD-(N+1)`\n\n**ปัญหา:** ถ้า 2 requests มาพร้อมกันในเสี้ยววินาทีเดียวกัน ทั้งคู่จะได้ count เท่ากัน → ได้เลขออเดอร์เหมือนกัน → insert แรกสำเร็จ insert สองล้มเหลวด้วย Prisma error `P2002` (unique constraint violation)\n\n**สิ่งที่ caller ต้องทำ (API route):**\n```typescript\ntry {\n  const orderNumber = await generateOrderNumber();\n  await prisma.order.create({ data: { orderNumber, ... } });\n} catch (err) {\n  if (isPrismaError(err, 'P2002')) {\n    // retry once\n  }\n}\n```\n\nสำหรับร้านกาแฟทั่วไป (ออเดอร์ไม่พร้อมกันมาก) โอกาสชนน้อยมาก แต่ต้อง handle ไว้"
+    },
+    {
+      "file": "src/types/index.ts",
+      "line": 1,
+      "title": "types/index.ts — Single Source of Truth",
+      "description": "**ไฟล์นี้คือ central registry ของทุก type ในโปรเจกต์**\n\nอ่าน convention comment ที่ด้านบนก่อน — มันอธิบาย pattern สำคัญ:\n\n1. Define Zod schema ใน `src/lib/validations/{resource}.ts`\n2. Export schema ด้วยชื่อ camelCase + `Schema`\n3. Infer type ที่ไฟล์นี้: `type XFormData = z.infer<typeof xSchema>`\n4. ใช้ type ใน components, validate ใน API routes\n\n**ผลลัพธ์:** validation rules และ TypeScript types sync กันอัตโนมัติ ถ้าแก้ schema — type เปลี่ยนตาม TypeScript จะ error ที่ทุกจุดที่ type ไม่ตรง"
+    },
+    {
+      "file": "src/types/index.ts",
+      "line": 30,
+      "title": "ApiResponse<T> — Discriminated Union",
+      "description": "**รูปแบบ response มาตรฐานของทุก API route ในโปรเจกต์**\n\n```typescript\ntype ApiResponse<T> =\n  | { success: true; data: T }\n  | { success: false; error: string };\n```\n\nนี่คือ **discriminated union** — TypeScript บังคับให้ check `success` ก่อนเข้าถึง `data` หรือ `error` ได้เลย ไม่มีทางลืม handle error case\n\n```typescript\nif (res.success) {\n  res.data; // T — TypeScript รู้ว่ามีแน่\n} else {\n  res.error; // string — TypeScript รู้ว่ามีแน่\n}\n```\n\n`PaginatedApiResponse<T>` (บรรทัดถัดไป) ใช้ `ApiResponse<{ items: T[]; meta: {...} }>` — compose กับ union เดิมได้เลย ไม่ใช่ type แยก"
+    },
+    {
+      "file": "src/types/index.ts",
+      "line": 59,
+      "title": "CartState + CartAction — POS Cart Pattern",
+      "description": "**นี่คือ state shape สำหรับ `useReducer` ที่จะขับเคลื่อน POS interface หลัก**\n\n`CartState` เก็บ:\n- `tableId` — nullable (null = takeout)\n- `items` — array of CartItem (menuId, name, price, quantity, note)\n- `discount` — ส่วนลดรวมทั้งออเดอร์\n\n`CartAction` เป็น discriminated union เช่นกัน — แต่ละ `type` มี payload ที่ต่างกัน:\n```typescript\n{ type: \"ADD_ITEM\"; item: ...; note?: string }\n{ type: \"UPDATE_QUANTITY\"; menuId: string; quantity: number }\n{ type: \"SET_DISCOUNT\"; discount: number }\n// ...etc\n```\n\nPattern นี้ทำให้ cart reducer type-safe ทั้งหมด — TypeScript จะ error ถ้า dispatch action ผิด type หรือขาด property"
+    },
+    {
+      "file": "src/types/index.ts",
+      "line": 107,
+      "title": "Form Types — Inferred จาก Zod",
+      "description": "**ทุก form type ถูก derive จาก schema ด้วย `z.infer<typeof schema>` — ไม่เขียน type ซ้ำ**\n\n```typescript\nexport type CreateMenuFormData = z.infer<typeof createMenuSchema>;\nexport type UpdateMenuFormData = z.infer<typeof updateMenuSchema>;\n// ...\n```\n\nประโยชน์ที่จับต้องได้:\n- แก้ validation rule ใน schema → type เปลี่ยนตามทันที\n- ถ้า optional ใน schema → optional ใน type\n- ถ้าเพิ่ม field ใน schema → TypeScript บังคับให้แก้ทุก component ที่ใช้ type นั้น\n\n**ของที่มีครบ Phase 2:** menu (5 types), order (3), payment (5), staff (2), table (3) — ครอบคลุมทุก operation"
+    },
+    {
+      "directory": "src/lib/validations",
+      "title": "validations/ — 5 Schema Files",
+      "description": "**1 ไฟล์ต่อ 1 domain resource — ไม่รวมกัน**\n\nแต่ละไฟล์มีรูปแบบเหมือนกัน:\n- `createXSchema` — validate input เมื่อสร้างใหม่ (required fields ครบ)\n- `updateXSchema` — `.partial()` ของ create schema (ทุก field optional สำหรับ PATCH)\n- schema พิเศษตามความต้องการแต่ละ domain\n\nทุก error message เป็นภาษาไทย — เพราะแสดงตรงไปที่ UI ของพนักงาน\n\n**Convention ชื่อ:** camelCase + `Schema` suffix — `createMenuSchema`, `updateOrderStatusSchema`, `cashPaymentSchema`"
+    },
+    {
+      "file": "src/lib/validations/order.ts",
+      "line": 1,
+      "title": "orderItemSchema — Internal Nested Schema",
+      "description": "**`orderItemSchema` ไม่ได้ export — เป็น schema ภายในที่ใช้เฉพาะใน createOrderSchema**\n\nนี่คือตัวอย่าง nested schema — `createOrderSchema.items` คือ array ของ orderItemSchema\n\nทำไมไม่ export? เพราะ:\n1. ไม่มี use case อื่นนอกจากใน order creation\n2. export ออกมาโดยไม่จำเป็นทำให้ interface ของ module ใหญ่กว่าที่ควร\n3. ถ้าอยาก validate order item แยก — ต้องมี requirement ชัดเจนก่อน\n\nComment `// Nested schema — internal only` บอกทีมว่านี่เป็นการตั้งใจ ไม่ใช่ลืม export"
+    },
+    {
+      "file": "src/lib/validations/order.ts",
+      "line": 13,
+      "title": "createOrderSchema — Discount Bound",
+      "description": "**จุดที่ผ่าน review และแก้ไขมา — discount มี upper bound ชัดเจน**\n\n```typescript\ndiscount: z.number()\n  .min(0, \"ส่วนลดต้องไม่ติดลบ\")\n  .max(100000, \"ส่วนลดสูงสุด 100,000 บาท\")\n  .default(0),\n```\n\nทำไมต้องมี max? เพราะ Zod ตรวจได้แค่ shape ของ request — ไม่รู้ว่า discount เกิน order total หรือเปล่า ถ้าไม่มี max ใครก็ส่ง discount: 999999 มาทำให้ total ติดลบได้\n\n**Note สำหรับ API route:** ต้อง validate เพิ่มว่า `discount <= subtotal` ตอน process จริงด้วย schema ทำได้แค่ cap ไว้ที่ 100,000 บาท"
+    },
+    {
+      "file": "src/lib/validations/payment.ts",
+      "line": 1,
+      "title": "Payment Schemas — 4 Methods, 4 Schemas",
+      "description": "**แต่ละ payment method มี schema ของตัวเอง เพราะ payload ต่างกัน**\n\n**cashPaymentSchema** — ต้องการ `amountTendered` (เงินที่รับมา) แต่ไม่สามารถ validate ได้ใน schema ว่าคืนทอนถูกไหม เพราะไม่รู้ order total ตรงนี้ → API route ต้องตรวจเพิ่ม\n\n**promptpayPaymentSchema** — แค่ `orderId` เพียงพอ (server สร้าง QR เอง)\n\n**confirmPromptPaySchema** — `orderId` เช่นกัน แต่ semantic ต่าง (confirm หลัง scan)\n\n**cardPaymentSchema** — มี `omiseToken` ที่ validate ด้วย regex `/^tokn_/` ป้องกัน garbage token ไปถึง Omise API\n\n**mockupPaymentSchema** — มี `simulateSuccess: boolean` สำหรับ test flow ใน dev"
+    },
+    {
+      "file": "src/lib/api-error.ts",
+      "line": 11,
+      "title": "ApiError — Structured Error Class",
+      "description": "**แทนที่จะ throw generic `Error` ให้ throw `ApiError` ที่มี HTTP status ติดมาด้วย**\n\n```typescript\nthrow new ApiError(\"ไม่พบเมนูนี้\", 404);\nthrow new ApiError(\"ไม่มีสิทธิ์เข้าถึง\", 403, \"FORBIDDEN\");\n```\n\n`withHandler` (ใน route-handler.ts) จะ catch `ApiError` และ return HTTP response ที่ถูก status โดยอัตโนมัติ\n\n`code` field (optional) ใช้สำหรับ client-side error handling ที่ละเอียดกว่าแค่ HTTP status เช่น `\"OUT_OF_STOCK\"`, `\"TABLE_OCCUPIED\"` — ทำให้ frontend แสดง error message ที่เหมาะสมได้"
+    },
+    {
+      "file": "src/lib/api-error.ts",
+      "line": 24,
+      "title": "HTTP Status Helpers — ภาษาไทย Built-in",
+      "description": "**7 helper functions ที่ wrap ApiError พร้อม default Thai message**\n\n```typescript\nbadRequest()     // 400 — \"ข้อมูลไม่ถูกต้อง\"\nunauthorized()   // 401 — \"กรุณาเข้าสู่ระบบก่อน\"\nforbidden()      // 403 — \"ไม่มีสิทธิ์เข้าถึง\"\nnotFound()       // 404 — \"ไม่พบข้อมูล\"\nconflict()       // 409 — \"ข้อมูลซ้ำกัน\"\nunprocessable()  // 422 — (ต้องใส่ message เอง)\nserverError()    // 500 — \"เกิดข้อผิดพลาดภายในระบบ\"\n```\n\nทุก function รับ custom message ได้ — `notFound(\"ไม่พบเมนูนี้\")` หรือใช้ default ก็ได้\n\n**ใน API route จะเห็นแบบนี้บ่อยมาก:**\n```typescript\nif (!menu) throw notFound(\"ไม่พบเมนูนี้\");\nif (staff.role !== \"admin\") throw forbidden();\n```"
+    },
+    {
+      "file": "src/lib/api-response.ts",
+      "line": 6,
+      "title": "api-response.ts — Response Builders",
+      "description": "**4 functions สร้าง NextResponse ที่ typed กับ ApiResponse<T> อย่างถูกต้อง**\n\n```typescript\nsuccessResponse(data)          // 200 + { success: true, data }\ncreatedResponse(data)          // 201 + { success: true, data }\npaginatedResponse(items, meta) // 200 + { success: true, data: { items, meta } }\nerrorResponse(message, status) // 4xx/5xx + { success: false, error }\n```\n\nตัวอย่างการใช้ใน API route:\n```typescript\nreturn successResponse(menu);              // GET\nreturn createdResponse(newOrder);          // POST\nreturn paginatedResponse(menus, { total: 42, page: 1, limit: 10 });\nreturn errorResponse(\"ไม่พบข้อมูล\", 404); // แต่ใช้ throw notFound() ดีกว่า\n```\n\nทุก function return `NextResponse<ApiResponse<T>>` — TypeScript รู้ type ของ response body ตั้งแต่ server ถึง client"
+    },
+    {
+      "file": "src/lib/route-handler.ts",
+      "line": 26,
+      "title": "withHandler — HOF ที่ทุก Route ต้องใช้",
+      "description": "**CLAUDE.md บังคับว่าทุก API route ต้องมี try/catch + Thai error — `withHandler` ทำให้อัตโนมัติ**\n\nวิธีใช้:\n```typescript\n// src/app/api/menu/route.ts\nexport const GET = withHandler(async (req) => {\n  const menus = await prisma.menu.findMany();\n  return successResponse(menus);\n});\n```\n\nไม่ต้องเขียน try/catch เอง `withHandler` จัดการ 3 กรณีให้:\n1. **ZodError** → 400 + error message ภาษาไทยจาก `err.issues[0].message`\n2. **ApiError** → HTTP status ที่ระบุใน error + Thai message\n3. **Unknown error** → 500 + \"เกิดข้อผิดพลาดภายในระบบ\" + log ใน stderr"
+    },
+    {
+      "file": "src/lib/route-handler.ts",
+      "line": 31,
+      "title": "Error Cascade — ZodError → ApiError → Unknown",
+      "description": "**ลำดับการ catch สำคัญมาก — ต้อง specific ก่อน generic เสมอ**\n\n```typescript\ncatch (err) {\n  if (err instanceof ZodError) { ... }   // 1st: Validation errors\n  if (err instanceof ApiError) { ... }   // 2nd: Business logic errors\n  process.stderr.write(...)              // 3rd: Unexpected errors\n}\n```\n\n**ZodError ต้อง check ก่อน ApiError** เพราะถ้า schema.parse() throw ใน route แล้วเราไม่ catch ZodError ก่อน มันจะไปโผล่เป็น \"เกิดข้อผิดพลาดภายในระบบ\" แทนที่จะเป็น error message ภาษาไทยที่ useful\n\nSingตัวสำคัญ: ใช้ `err.issues[0]?.message` ไม่ใช่ `.errors[0]` เพราะ Zod v4 เปลี่ยน property name แล้ว"
+    },
+    {
+      "file": "src/lib/api-auth.ts",
+      "line": 15,
+      "title": "AuthenticatedStaff — Contract สำหรับ Phase 3",
+      "description": "**ไฟล์นี้วาง contract ไว้ก่อน — implementation มาใน Phase 3 (Supabase Auth)**\n\n`AuthenticatedStaff` type กำหนดว่า session ที่ verified แล้วจะมีข้อมูลอะไรบ้าง:\n- `id` — Prisma staff ID\n- `authId` — Supabase auth user ID\n- `name` — ชื่อพนักงาน\n- `role` — cashier / barista / admin\n- `isActive` — บัญชีต้องยัง active\n\nทุก API route ที่ต้องการ auth จะ return type นี้จาก `requireAuth()` ทำให้ TypeScript รู้ว่า staff.role มีค่าอะไรได้บ้างตั้งแต่ compile time"
+    },
+    {
+      "file": "src/lib/api-auth.ts",
+      "line": 29,
+      "title": "requireAuth + requireRole — Stub รอ Phase 3",
+      "description": "**ตอนนี้ `requireAuth` throw ทันที — จะ implement จริงใน Phase 3**\n\nComment ใน code บอก implementation plan ที่ชัดเจน:\n```typescript\n// const supabase = await createServerClient()\n// const { data: { user } } = await supabase.auth.getUser()\n// if (!user) throw unauthorized()\n// const staff = await prisma.staff.findUnique({ where: { authId: user.id } })\n// if (!staff || !staff.isActive) throw forbidden(...)\n```\n\n`requireRole` implement แล้วสมบูรณ์ — รับทั้ง single role หรือ array:\n```typescript\nawait requireRole(staff, \"admin\");                    // admin เท่านั้น\nawait requireRole(staff, [\"admin\", \"cashier\"]);       // ทั้งสองได้\n```\n\nThrow `forbidden()` (403) ถ้า role ไม่ตรง — ใช้ `forbidden()` ไม่ใช่ `unauthorized()` เพราะ authenticated แล้ว แค่ไม่มีสิทธิ์"
+    },
+    {
+      "title": "Phase 2 ครบแล้ว — พร้อมเขียน API Route แรก",
+      "description": "**ตอนนี้ infrastructure ทั้งหมดพร้อมแล้ว การเขียน API route ใดก็ตามจะใช้ pattern นี้:**\n\n```typescript\n// src/app/api/menu/route.ts\nimport { withHandler } from \"@/lib/route-handler\";\nimport { successResponse, createdResponse } from \"@/lib/api-response\";\nimport { notFound, forbidden } from \"@/lib/api-error\";\nimport { requireAuth, requireRole } from \"@/lib/api-auth\"; // Phase 3\nimport { createMenuSchema } from \"@/lib/validations/menu\";\nimport { prisma } from \"@/lib/prisma\";\n\nexport const GET = withHandler(async (req) => {\n  const menus = await prisma.menu.findMany();\n  return successResponse(menus);\n});\n\nexport const POST = withHandler(async (req) => {\n  const staff = await requireAuth(req);    // Phase 3\n  requireRole(staff, \"admin\");             // Phase 3\n  const body = createMenuSchema.parse(await req.json());\n  const menu = await prisma.menu.create({ data: body });\n  return createdResponse(menu);\n});\n```\n\n---\n\n**Phase 3 ต่อไป:** `src/lib/supabase/server.ts`, `client.ts`, `src/middleware.ts` + implement `requireAuth` จริงด้วย Supabase session\n\nดู tour `new-joiner-phase1-foundation` สำหรับ domain model และ schema"
+    }
+  ]
+}

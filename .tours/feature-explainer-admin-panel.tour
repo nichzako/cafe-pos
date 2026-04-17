@@ -1,0 +1,113 @@
+{
+  "$schema": "https://aka.ms/codetour-schema",
+  "title": "Phase 7 — Admin Panel (เมนู โต๊ะ พนักงาน)",
+  "description": "ทัวร์แบบภาษาชาวบ้าน อธิบายว่า Phase 7 ทำงานยังไงตั้งแต่ต้นจนจบ ครอบคลุม 3 หน้าหลัก (เมนู โต๊ะ พนักงาน) + API routes ของพนักงาน",
+  "ref": "main",
+  "steps": [
+    {
+      "directory": "src/app/(dashboard)",
+      "title": "Step 1 — ภาพรวม: Admin Panel มี 3 หน้า",
+      "description": "Phase 7 เพิ่ม 3 หน้าที่ admin เข้าถึงได้เท่านั้น คือ `/menu`, `/tables`, `/staff` — แต่ละหน้าอยู่ใน folder แยกกันข้างใน `(dashboard)` ซึ่งเป็น Route Group ของ Next.js (วงเล็บ = ไม่นับเป็น URL)\n\nแต่ละหน้าทำงานแบบ **3 ชั้น** เสมอ:\n1. `page.tsx` — Server Component, เช็คสิทธิ์ + ดึงข้อมูลจาก DB\n2. `_components/XxxListClient.tsx` — Client Component, จัดการ filter/tab/modal state\n3. `_components/XxxCard.tsx` หรือฟอร์ม — ส่วนย่อยที่คลิก/แก้ไขได้\n\nโครงสร้างนี้เหมือนกันทุกหน้า ทำให้ dev ใหม่อ่านแล้วเดาถูกทันทีว่าของอยู่ที่ไหน"
+    },
+    {
+      "file": "src/app/(dashboard)/menu/page.tsx",
+      "line": 12,
+      "title": "Step 2 — ประตูด่านแรก: admin เท่านั้นถึงเข้าได้",
+      "description": "บรรทัดนี้คือ 'ประตูรักษาความปลอดภัย' ที่ทุก admin page มีเหมือนกัน 3 บรรทัดนี้ทำงานต่อกัน:\n\n```\nconst staff = await getAuthenticatedStaff();  // อ่าน session\nif (!staff) redirect('/login');                // ยังไม่ login → ไป login\nif (staff.role !== 'admin') redirect('/orders'); // login แล้วแต่ไม่ใช่ admin → ไป orders\n```\n\nที่สำคัญคือการเช็คนี้อยู่บน **Server** ไม่ใช่ browser — ดังนั้นถ้าคนพยายาม navigate ตรง URL ก็ยังโดน redirect เหมือนกัน ปลอดภัยกว่าเช็คฝั่ง client แน่นอน\n\nทุก 3 หน้า (menu, tables, staff) ใช้ pattern เดียวกันนี้เป๊ะ"
+    },
+    {
+      "file": "src/app/(dashboard)/menu/page.tsx",
+      "line": 16,
+      "title": "Step 3 — ดึงข้อมูล 2 อย่างพร้อมกันด้วย Promise.all",
+      "description": "หน้า menu ต้องการ 2 อย่าง: รายการหมวดหมู่ + รายการเมนูทั้งหมด\n\n```typescript\nconst [categories, menus] = await Promise.all([\n  prisma.category.findMany(...),\n  prisma.menu.findMany(...),\n]);\n```\n\n**ทำไมไม่ await ทีละบรรทัด?** ถ้า await ทีละอัน จะต้องรอ DB query ที่ 1 เสร็จก่อน ค่อยส่ง query ที่ 2 = เสียเวลาซ้อนกัน\n\n`Promise.all` คือการส่ง 2 query ไปพร้อมกัน แล้วรอให้ทั้งคู่เสร็จพร้อมกัน เหมือนสั่งอาหาร 2 อย่างให้ครัว 2 คนทำพร้อมกัน แทนที่จะรอครัวคนเดียวทำทีละอย่าง — **เร็วกว่าเกือบ 2 เท่า**"
+    },
+    {
+      "file": "src/app/(dashboard)/menu/page.tsx",
+      "line": 43,
+      "title": "Step 4 — แปลง Decimal → Number ก่อนส่งให้ Client",
+      "description": "บรรทัดนี้สำคัญมากแต่มองข้ามง่ายมาก:\n\n```typescript\nconst serialized = menus.map((m) => ({\n  ...m,\n  price: Number(m.price),  // ← ตรงนี้!\n}));\n```\n\n**ปัญหา:** Prisma เก็บราคาเป็น `Decimal` (ชนิดพิเศษของ Prisma) ไม่ใช่ `number` ธรรมดา เวลาส่งข้ามจาก Server Component ไป Client Component, Next.js ต้อง serialize ผ่าน JSON — แต่ `Decimal` serialize ไม่ได้โดยตรง จะ error\n\nเลยต้องแปลงเป็น `Number()` ก่อนส่ง ทำบนฝั่ง Server ก่อนเสมอ เป็น pattern ที่ใช้ทุก field ที่เป็น Decimal ในโปรเจกต์นี้"
+    },
+    {
+      "file": "src/app/(dashboard)/menu/_components/MenuListClient.tsx",
+      "line": 28,
+      "title": "Step 5 — useMemo: นับจำนวนเมนูในแต่ละ tab แค่ครั้งเดียว",
+      "description": "บล็อกนี้นับว่าแต่ละหมวดหมู่มีเมนูกี่อัน เพื่อแสดงตัวเลขบน tab:\n\n```typescript\nconst countByCategory = useMemo(() => {\n  const map: Record<string, number> = { all: menus.length };\n  for (const m of menus) map[m.categoryId] = (map[m.categoryId] ?? 0) + 1;\n  return map;\n}, [menus]);\n```\n\n**ทำไมต้อง `useMemo`?** ถ้าไม่ใช้ ทุกครั้งที่ Component re-render (เช่น กดเปลี่ยน tab) จะต้องวนลูปนับใหม่ทุกครั้ง ถ้ามีเมนู 200 อัน = วนลูป 200 รอบทุก click\n\n`useMemo` บอก React ว่า 'คำนวณครั้งเดียวพอ แล้วเก็บผลไว้ — คำนวณใหม่แค่ตอนที่ `menus` เปลี่ยนเท่านั้น' เหมือนบันทึกคำตอบไว้ ไม่ต้องคิดซ้ำทุกรอบ\n\n`filtered` ด้านล่างก็ memoize ด้วยเหตุผลเดียวกัน"
+    },
+    {
+      "file": "src/app/(dashboard)/menu/_components/MenuListClient.tsx",
+      "line": 39,
+      "title": "Step 6 — openAdd vs openEdit: Modal เดียว ใช้ได้สองโหมด",
+      "description": "ดูฟังก์ชัน 3 ตัวนี้:\n\n```typescript\nfunction openAdd() {\n  setEditingMenu(null);    // ← null = โหมดเพิ่มใหม่\n  setIsModalOpen(true);\n}\n\nfunction openEdit(menu: MenuItemData) {\n  setEditingMenu(menu);   // ← มีข้อมูล = โหมดแก้ไข\n  setIsModalOpen(true);\n}\n```\n\nเคล็ดลับคือ state `editingMenu` ตัวเดียว — ถ้าเป็น `null` = modal แสดงฟอร์มเปล่าสำหรับเพิ่มเมนูใหม่, ถ้ามีข้อมูล = modal pre-fill ข้อมูลเดิมให้แก้ไข\n\nฝั่ง `MenuFormModal` อ่านค่านี้แล้วตัดสินใจว่าจะ POST (สร้างใหม่) หรือ PATCH (อัปเดต) — modal เดียวทำได้สองอย่างโดยไม่ต้องสร้าง component ซ้ำ"
+    },
+    {
+      "file": "src/app/(dashboard)/menu/_components/MenuFormModal.tsx",
+      "line": 47,
+      "title": "Step 7 — useEffect: pre-fill form อัตโนมัติเมื่อเปิด edit mode",
+      "description": "```typescript\nuseEffect(() => {\n  if (editingMenu) {\n    setForm({ name: editingMenu.name, price: String(editingMenu.price), ... });\n  } else {\n    setForm({ ...EMPTY_FORM, categoryId: categories[0]?.id ?? '' });\n  }\n  setErrors({});\n  setApiError(null);\n}, [editingMenu, categories]);\n```\n\n**ทำงานยังไง:** ทุกครั้งที่ `editingMenu` เปลี่ยน (null ↔ มีข้อมูล), useEffect จะรันอัตโนมัติ\n- `editingMenu` มีค่า → เอาข้อมูลเดิมมาใส่ฟอร์ม\n- `editingMenu` เป็น null → ล้างฟอร์มกลับเป็นค่าว่าง\n\n**สิ่งที่ต้องระวัง:** `deps array` ต้องไม่มี `isOpen` เพราะถ้ามี จะ reset form ทุกครั้งที่ parent re-render แม้ modal ยังเปิดอยู่ — ผู้ใช้ที่กำลังพิมพ์อยู่จะโดนลบข้อมูลหายทันที (bug ที่เคยมีและแก้ไปแล้ว)"
+    },
+    {
+      "file": "src/app/(dashboard)/menu/_components/MenuCard.tsx",
+      "line": 27,
+      "title": "Step 8 — แยก state toggle vs delete ออกจากกัน",
+      "description": "```typescript\nconst [isToggling, setIsToggling] = useState(false);\nconst [isDeleting, setIsDeleting] = useState(false);\n```\n\n**ทำไมไม่ใช้ `isBusy` ตัวเดียว?** เพราะถ้า toggle กำลัง loading และผู้ใช้คลิก delete — ถ้าแชร์ flag เดียวกัน delete จะเงียบ ทำอะไรไม่ได้ แต่ผู้ใช้ไม่รู้ว่าทำไม\n\nแยกเป็นสองตัวทำให้:\n- ตอน toggle กำลังทำงาน → disable toggle button + disable delete button ด้วย (ป้องกัน race condition)\n- ตอน delete กำลังทำงาน → card เป็น opacity 60% ทั้งก้อน บอกสถานะชัดเจน\n- แต่ละปุ่มรู้ว่าตัวเองกำลัง 'ยุ่ง' กับอะไรอยู่\n\nดูบรรทัด 97 และ 130 จะเห็นว่าปุ่มทั้งสองตรวจสอบทั้ง `isToggling || isDeleting` ก่อน disable"
+    },
+    {
+      "file": "src/app/(dashboard)/menu/_components/MenuCard.tsx",
+      "line": 99,
+      "title": "Step 9 — Toggle Switch: role='switch' + aria-hidden บน span ตกแต่ง",
+      "description": "```tsx\n<button\n  role=\"switch\"\n  aria-checked={menu.isAvailable}\n  aria-label={`${menu.isAvailable ? 'ปิด' : 'เปิด'}ขาย ${menu.name}`}\n  disabled={isToggling || isDeleting}\n>\n  <span aria-hidden=\"true\" ... />  {/* วงกลมข้างใน */}\n</button>\n```\n\n**อธิบายแบบชาวบ้าน:**\n- `role=\"switch\"` → บอก screen reader ว่า 'นี่ไม่ใช่ button ธรรมดา มันเป็นสวิตช์ on/off'\n- `aria-checked` → บอกสถานะปัจจุบัน (true/false) ให้คนใช้ screen reader ได้ยิน\n- `aria-label` → คนตาบอดจะได้ยินว่า 'เปิดขาย อเมริกาโน่' แทนที่จะเงียบ\n- `aria-hidden=\"true\"` บน span → วงกลมข้างในเป็นแค่ลูกเล่น CSS ไม่มีความหมาย บอก screen reader ให้ข้ามไปได้เลย ไม่งั้นจะอ่านออกมาเป็น noise"
+    },
+    {
+      "file": "src/app/(dashboard)/tables/_components/TableListClient.tsx",
+      "line": 22,
+      "title": "Step 10 — statusConfig: map สีแบดจ์จาก status string",
+      "description": "```typescript\nconst statusConfig: Record<TableStatus, { label: string; classes: string }> = {\n  available: { label: 'ว่าง',      classes: 'bg-emerald-100 text-emerald-700' },\n  occupied:  { label: 'มีลูกค้า', classes: 'bg-amber-100 text-amber-700' },\n  reserved:  { label: 'จอง',      classes: 'bg-blue-100 text-blue-700' },\n};\n```\n\nนี่คือ pattern ที่ใช้ซ้ำในโปรเจกต์นี้บ่อยมาก — เรียกว่า 'config object as switch statement'\n\n**ทำไมดีกว่า if/else?** ถ้าเขียน if-else จะได้:\n```typescript\nif (status === 'available') label = 'ว่าง'; color = 'green';\nelse if (status === 'occupied') label = 'มีลูกค้า'; color = 'amber';\n// ...ยาวขึ้นเรื่อยๆ\n```\n\nแต่ config object อ่านง่ายกว่า เพิ่ม status ใหม่แค่ใส่ row ใหม่ 1 บรรทัด และ TypeScript จะ error ทันทีถ้าลืม handle status ที่มีอยู่\n\n`TableStatus` type ถูก import มาจาก `@/types/index` ไม่ได้ define ซ้ำในไฟล์นี้ — ถ้า schema เพิ่ม status ใหม่ type จะ error ที่นี่ทันที บังคับให้แก้"
+    },
+    {
+      "file": "src/app/(dashboard)/tables/_components/TableListClient.tsx",
+      "line": 83,
+      "title": "Step 11 — handleDelete: deletingId แทนที่จะเป็น global loading",
+      "description": "```typescript\nasync function handleDelete(table: TableData) {\n  if (!confirm(...)) return;\n  setDeletingId(table.id);  // ← เก็บ id ของโต๊ะที่กำลังลบ\n  try { ... }\n  finally { setDeletingId(null); }  // ← reset เมื่อเสร็จ\n}\n```\n\nแล้วใน render:\n```tsx\nconst isDeleting = deletingId === table.id;  // เช็คทีละการ์ด\n<div className={isDeleting ? 'opacity-60 pointer-events-none' : ''}>\n```\n\n**ทำไมเก็บ id แทนแค่ boolean?** เพราะมีหลายโต๊ะพร้อมกัน ถ้าเก็บแค่ `isDeleting: boolean` — ลบโต๊ะไหนก็จะทำให้ทุกโต๊ะ loading พร้อมกัน ดูแปลกมาก\n\nเก็บ id แทน ทำให้แต่ละการ์ดเช็คได้ว่า 'ฉันใช่ตัวที่กำลังถูกลบไหม' แสดง loading เฉพาะการ์ดที่ถูกลบ การ์ดอื่นปกติ"
+    },
+    {
+      "file": "src/app/(dashboard)/staff/page.tsx",
+      "line": 27,
+      "title": "Step 12 — ส่ง createdAt เป็น ISO string + ส่ง currentStaffId ลงมาด้วย",
+      "description": "```typescript\nconst serialized = members.map((m) => ({\n  ...m,\n  createdAt: m.createdAt.toISOString(),  // Date → string\n}));\n\nreturn <StaffListClient members={serialized} currentStaffId={staff.id} />;\n```\n\n**createdAt:** คล้ายกับ Decimal ของ menu — Prisma คืน `Date` object ที่ serialize ข้าม Server→Client ไม่ได้ ต้องแปลงเป็น ISO string ก่อน\n\n**currentStaffId:** ส่ง id ของคนที่ login อยู่ลงไปด้วย ทำไม? เพราะใน StaffCard ต้องรู้ว่า 'การ์ดนี้ใช่บัญชีของฉันเองไหม' ถ้าใช่จะ disable toggle ป้องกันไม่ให้ admin ปิดการใช้งานตัวเอง\n\nข้อมูลนี้อ่านได้บน Server เพราะมี session อยู่แล้ว ไม่ต้อง fetch เพิ่ม"
+    },
+    {
+      "file": "src/lib/validations/staff.ts",
+      "line": 17,
+      "title": "Step 13 — Zod schema ป้องกัน body เปล่าเข้า PATCH",
+      "description": "```typescript\nexport const updateStaffSchema = z\n  .object({\n    name: z.string()...optional(),\n    role: z.enum(...)...optional(),\n    isActive: z.boolean().optional(),\n  })\n  .refine(\n    (data) => Object.keys(data).length > 0,\n    { message: 'ต้องระบุข้อมูลที่ต้องการอัปเดตอย่างน้อย 1 ฟิลด์' }\n  );\n```\n\n**ปัญหาถ้าไม่มี `.refine()`:** ทุก field เป็น optional หมด ดังนั้น `{}` (body เปล่า) จะผ่าน Zod ได้ → Prisma ได้รับ empty data → update ไม่มีอะไรเลย → ส่ง 200 OK กลับ → client งง\n\n`.refine()` เป็นการเพิ่ม custom validation หลัง schema ปกติ — บอกว่า 'แม้ field แต่ละอันจะ optional แต่ต้องมีอย่างน้อย 1 อัน' ถ้าส่งมาเปล่าจะได้ 400 Bad Request กลับทันที"
+    },
+    {
+      "file": "src/app/api/staff/[id]/route.ts",
+      "line": 11,
+      "title": "Step 14 — STAFF_SELECT: ใช้ constant เดียวให้ GET/PATCH/DELETE คืนข้อมูลตรงกัน",
+      "description": "```typescript\nconst STAFF_SELECT = {\n  id: true, name: true, role: true,\n  isActive: true, createdAt: true,\n} as const;\n```\n\nแล้วทุก handler ใช้ constant นี้:\n```typescript\n// GET\nselect: STAFF_SELECT\n// PATCH\nselect: STAFF_SELECT\n```\n\n**ทำไมสำคัญ?** ถ้าแต่ละ endpoint เลือก field เองคนละที่ — GET อาจคืน `createdAt` แต่ PATCH ไม่คืน ทำให้ client ได้ข้อมูล shape ไม่เหมือนกัน TypeScript จะ complain หรือ UI แสดงผลผิด\n\n`as const` บอก TypeScript ว่า object นี้ไม่มีวันเปลี่ยน ทำให้ type inference แม่นยำขึ้น"
+    },
+    {
+      "file": "src/app/api/staff/[id]/route.ts",
+      "line": 44,
+      "title": "Step 15 — Self-protection: ป้องกัน admin ลบ/ปิด account ตัวเอง",
+      "description": "```typescript\n// ใน PATCH:\nif (id === requestor.id && data.isActive === false) {\n  throw badRequest('ไม่สามารถปิดการใช้งานบัญชีของตัวเองได้');\n}\n\n// ใน DELETE:\nif (id === requestor.id) {\n  throw badRequest('ไม่สามารถลบบัญชีของตัวเองได้');\n}\n```\n\nนี่คือ business rule ที่สำคัญมาก ถ้าไม่มีตรงนี้ admin สามารถ 'ล็อคตัวเองออกจากระบบ' ได้โดยไม่ตั้งใจ — ปิดการใช้งานแล้วเข้า login ไม่ได้ ไม่มีใครมาแก้ได้\n\nระบบเช็คที่ทั้ง **API layer** (บรรทัดนี้) และ **UI layer** (StaffCard.tsx บรรทัด 42 และ 104) ดังนั้นแม้คนเลี่ยงผ่าน UI ไปตรง API ก็ยังโดนบล็อก\n\nสำหรับ DELETE ยังมีเช็คเพิ่มว่าถ้า staff คนนั้นมีประวัติออเดอร์หรือ payment จะลบไม่ได้ ต้องใช้ deactivate แทน เพื่อรักษา data integrity ของประวัติการขาย"
+    },
+    {
+      "file": "src/app/(dashboard)/staff/_components/StaffListClient.tsx",
+      "line": 26,
+      "title": "Step 16 — นับจำนวนพนักงานแต่ละตำแหน่งด้วย loop เดียว",
+      "description": "```typescript\nconst countByRole = useMemo(() => {\n  const map: Record<string, number> = { all: members.length };\n  for (const m of members) {\n    map[m.role] = (map[m.role] ?? 0) + 1;\n  }\n  return map;\n}, [members]);\n\nconst filtered = useMemo(\n  () => activeFilter === 'all' ? members : members.filter(...),\n  [members, activeFilter],\n);\n```\n\nทำไมทำสองอัน? เพราะนับกับกรองมี dependency ต่างกัน:\n- `countByRole` — ต้องคำนวณใหม่แค่ตอน `members` เปลี่ยน (ข้อมูลจาก server refresh)\n- `filtered` — ต้องคำนวณใหม่ตอน `activeFilter` เปลี่ยน (กดเปลี่ยน tab) ด้วย\n\nถ้า merge เป็นอันเดียว กดเปลี่ยน tab จะทำให้นับใหม่ด้วยโดยไม่จำเป็น `useMemo` แยกกัน = แต่ละอันคำนวณใหม่เฉพาะเมื่อ dependency ตัวมันเองเปลี่ยน"
+    },
+    {
+      "file": "src/app/(dashboard)/staff/_components/StaffCard.tsx",
+      "line": 32,
+      "title": "Step 17 — isSelf: ป้องกัน admin ปิดตัวเองที่ UI ด้วย",
+      "description": "```typescript\nconst isSelf = member.id === currentStaffId;\n\n// ใช้ตรงนี้:\nasync function toggleActive() {\n  if (isSelf) return; // ← กันไว้ก่อนเลย\n  ...\n}\n\n// และตรง button:\ndisabled={isUpdating || isSelf}\ntitle={isSelf ? 'ไม่สามารถเปลี่ยนสถานะบัญชีของตัวเองได้' : undefined}\n```\n\n`currentStaffId` ที่ส่งมาจาก `page.tsx` ถูกใช้ตรงนี้แหละ — แต่ละการ์ดเช็คว่า id ของตัวเองตรงกับ id คนที่ login อยู่ไหม\n\nถ้าใช่ (`isSelf = true`):\n- ฟังก์ชัน `toggleActive` return ออกทันที ไม่ทำอะไร\n- ปุ่ม toggle จะ disabled + มี tooltip อธิบาย\n- `title` attribute จะแสดงเป็น tooltip เวลา hover\n\nป้องกันทั้ง 'กดแล้ว', 'keyboard tab', และ 'screen reader' ไม่ให้ trigger ได้"
+    },
+    {
+      "title": "จบแล้ว! Phase 7 Admin Panel ทำงานยังไงสรุปสั้น",
+      "description": "ถ้าจะจำแค่ไม่กี่จุดจากทัวร์นี้:\n\n**Pattern หลัก:**\n- Server page.tsx → เช็คสิทธิ์ → ดึงข้อมูล → serialize (Decimal/Date) → ส่งให้ Client\n- Client ListClient → จัดการ filter/modal state + useMemo ป้องกัน re-render ที่ไม่จำเป็น\n- Client Card → จัดการ action แต่ละอัน (toggle, delete) แยก state ออกจากกัน\n\n**Safety rules:**\n- Admin guard ทุกหน้า (server-side redirect)\n- Self-protection ทั้ง UI + API (admin ลบ/ปิดตัวเองไม่ได้)\n- DELETE ตรวจ dependency ก่อนเสมอ (ถ้ามีประวัติออเดอร์ = ห้ามลบ)\n- Zod `.refine()` ปิดกั้น empty PATCH body\n\n**Next Phase ที่วางแผนไว้:** Realtime order updates ด้วย Supabase Realtime — ทำให้หน้า orders ของบาริสต้าอัปเดตสถานะอัตโนมัติเมื่อมีออเดอร์ใหม่ โดยไม่ต้อง refresh หน้าเอง"
+    }
+  ]
+}
