@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   // into Vercel serverless functions — without this, native .node binaries
   // and generated files are excluded from the deployment bundle.
   outputFileTracingIncludes: {
-    "/**": ["./src/generated/prisma/**/*"],
+    "**": ["./src/generated/prisma/**/*"],
   },
   images: {
     remotePatterns: [
