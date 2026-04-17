@@ -17,8 +17,8 @@ CREATE OR REPLACE FUNCTION public.get_current_staff_role()
 RETURNS TEXT AS $$
   SELECT role::text
   FROM public.staff
-  WHERE auth_id = auth.uid()
-    AND is_active = true
+  WHERE "authId" = auth.uid()::text
+    AND "isActive" = true
   LIMIT 1
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
@@ -72,11 +72,11 @@ CREATE POLICY "staff_update_admin_or_self"
   TO authenticated
   USING (
     public.get_current_staff_role() = 'admin'
-    OR auth_id = auth.uid()
+    OR "authId" = auth.uid()::text
   )
   WITH CHECK (
     public.get_current_staff_role() = 'admin'
-    OR auth_id = auth.uid()
+    OR "authId" = auth.uid()::text
   );
 
 CREATE POLICY "staff_delete_service_role"

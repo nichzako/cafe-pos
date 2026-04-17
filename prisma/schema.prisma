@@ -183,6 +183,7 @@ model Payment {
   @@map("payments")
   @@index([status])
   @@index([staffId])
+  @@index([method, paidAt])
 }
 
 model Receipt {

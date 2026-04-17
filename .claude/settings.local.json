@@ -34,7 +34,8 @@
       "Bash(grep -n \"prisma.order.update\\\\|prisma.table.update\" /c/Users/nichchanp/Desktop/TestClaude/Code/cafe-pos/src/app/api/orders/[id]/route.ts)",
       "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\('next:', p.dependencies.next\\)\")",
       "Bash(npm test:*)",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Bash(npx skills *)"
     ]
   }
 }

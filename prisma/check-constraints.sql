@@ -15,8 +15,8 @@ ALTER TABLE orders
 
 ALTER TABLE order_items
   ADD CONSTRAINT order_items_quantity_positive   CHECK (quantity > 0),
-  ADD CONSTRAINT order_items_menu_price_positive CHECK (menu_price > 0),
-  ADD CONSTRAINT order_items_line_total_positive CHECK (line_total > 0);
+  ADD CONSTRAINT order_items_menu_price_positive CHECK ("menuPrice" > 0),
+  ADD CONSTRAINT order_items_line_total_positive CHECK ("lineTotal" > 0);
 
 ALTER TABLE payments
   ADD CONSTRAINT payments_amount_positive CHECK (amount > 0);
