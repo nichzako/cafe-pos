@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Ensure Prisma generated client (custom output path) is bundled
+  // into Vercel serverless functions — without this, native .node binaries
+  // and generated files are excluded from the deployment bundle.
+  outputFileTracingIncludes: {
+    "/**": ["./src/generated/prisma/**/*"],
+  },
   images: {
     remotePatterns: [
       {
