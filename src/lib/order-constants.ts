@@ -1,4 +1,4 @@
-import type { OrderStatus } from "@/generated/prisma/client";
+import type { OrderStatus } from "@prisma/client";
 
 /**
  * Statuses that represent an order currently in progress.

@@ -12,7 +12,7 @@
  * USAGE:   import { prisma } from "@/lib/prisma"
  * NEVER:   new PrismaClient()  ← causes connection pool exhaustion in dev
  */
-import { PrismaClient } from "@/generated/prisma/client";
+import { PrismaClient } from "@prisma/client";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;

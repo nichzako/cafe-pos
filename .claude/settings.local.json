@@ -40,7 +40,10 @@
       "Bash(git mv *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git commit -m 'fix: include Prisma generated files in Vercel serverless bundle *)",
+      "Bash(git commit -m 'fix: add binaryTargets for Vercel Linux runtime *)",
+      "Bash(npx tsc *)"
     ]
   }
 }

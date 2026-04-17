@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { badRequest, notFound, conflict } from "@/lib/api-error";
 import { generateReceiptNumber } from "@/lib/order-number";
 import { createOmiseClient, toSatang } from "@/lib/omise-client";
-import { Prisma, PaymentMethod as PrismaPaymentMethod } from "@/generated/prisma/client";
+import { Prisma, PaymentMethod as PrismaPaymentMethod } from "@prisma/client";
 import type { ReceiptData } from "@/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────

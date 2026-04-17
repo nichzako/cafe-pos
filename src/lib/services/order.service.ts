@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notFound, badRequest } from "@/lib/api-error";
 import { generateOrderNumber } from "@/lib/order-number";
-import { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@prisma/client";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

@@ -7,7 +7,7 @@ import { createdResponse, paginatedResponse } from "@/lib/api-response";
 import { createOrderSchema } from "@/lib/validations/order";
 import { createOrder } from "@/lib/services/order.service";
 import { ACTIVE_ORDER_STATUSES } from "@/lib/order-constants";
-import { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@prisma/client";
 import { badRequest } from "@/lib/api-error";
 
 // ─── Constants ────────────────────────────────────────────────────────────────

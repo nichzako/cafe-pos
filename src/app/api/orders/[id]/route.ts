@@ -8,7 +8,7 @@ import { updateOrderStatusSchema } from "@/lib/validations/order";
 
 type Context = { params: Promise<Record<string, string>> };
 
-import type { OrderStatus } from "@/generated/prisma/client";
+import type { OrderStatus } from "@prisma/client";
 
 // Valid status transitions — prevents arbitrary status jumps.
 // Non-cancel transitions are intentionally open to any authenticated staff:
