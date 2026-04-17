@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Proxy (Next.js 16 ใช้ชื่อ "proxy" แทน "middleware") — Session Refresh + Route Protection
+ * Middleware — Session Refresh + Route Protection
  *
  * ทำ 2 อย่างทุก request:
  * 1. Refresh Supabase session token (สำคัญมาก — ห้ามลบหรือย้าย code ส่วนนี้)
@@ -17,7 +17,7 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   // ต้อง create response ก่อน เพื่อให้ setAll cookies ทำงานได้
   let supabaseResponse = NextResponse.next({ request });
 
