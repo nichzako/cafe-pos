@@ -120,6 +120,19 @@ export function MenuFormModal({ isOpen, onClose, categories, editingMenu }: Prop
     setErrors((prev) => ({ ...prev, [field]: undefined }));
   }
 
+  if (categories.length === 0) {
+    return (
+      <Modal isOpen={isOpen} onClose={onClose} title="เพิ่มเมนูใหม่">
+        <div className="flex flex-col items-center gap-3 py-4 text-center">
+          <p className="text-sm text-cafe-brown-700">ยังไม่มีหมวดหมู่ กรุณาเพิ่มหมวดหมู่ก่อนเพิ่มเมนู</p>
+          <button type="button" onClick={onClose} className="text-sm text-cafe-brown-500 underline">
+            ปิด
+          </button>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal
       isOpen={isOpen}
