@@ -1,0 +1,1220 @@
+#%RAML 1.0
+title: Cafe POS API
+version: v1
+baseUri: /api
+mediaType: application/json
+
+description: |
+  RESTful API สำหรับระบบ Point of Sale ของร้านกาแฟ
+  สร้างด้วย Next.js 15 App Router + Supabase Auth + Prisma + PostgreSQL
+
+  **Authentication:** Supabase session cookie (httpOnly) — ทุก endpoint ต้องผ่าน auth ยกเว้น /auth/signout
+  **Roles:** cashier | barista | admin
+
+# ─── Security ────────────────────────────────────────────────────────────────
+
+securitySchemes:
+  supabaseSession:
+    description: Supabase Auth session cookie (set โดย SSR auth flow)
+    type: Pass Through
+    describedBy:
+      headers:
+        Cookie:
+          description: sb-* session cookies จาก Supabase Auth
+          type: string
+          required: true
+      responses:
+        401:
+          description: ไม่มี session หรือ session หมดอายุ
+        403:
+          description: Role ไม่มีสิทธิ์เข้าถึง endpoint นี้
+
+# ─── Traits ──────────────────────────────────────────────────────────────────
+
+traits:
+  paginated:
+    queryParameters:
+      page:
+        type: integer
+        minimum: 1
+        default: 1
+        required: false
+      limit:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+        required: false
+    responses:
+      200:
+        body:
+          application/json:
+            type: PaginatedResponse
+
+  secured:
+    securedBy: [supabaseSession]
+
+# ─── Types ───────────────────────────────────────────────────────────────────
+
+types:
+
+  # Response envelope
+  ApiResponse:
+    type: object
+    properties:
+      success: boolean
+    discriminator: success
+
+  SuccessResponse:
+    type: ApiResponse
+    properties:
+      success:
+        type: boolean
+        enum: [true]
+      data: any
+
+  ErrorResponse:
+    type: object
+    properties:
+      success:
+        type: boolean
+        enum: [false]
+      error: string
+    example:
+      success: false
+      error: "ไม่พบข้อมูลที่ต้องการ"
+
+  PaginatedResponse:
+    type: object
+    properties:
+      success:
+        type: boolean
+        enum: [true]
+      data:
+        type: object
+        properties:
+          items: any[]
+          meta:
+            type: object
+            properties:
+              total: integer
+              page: integer
+              limit: integer
+
+  # Enums
+  UserRole:
+    type: string
+    enum: [cashier, barista, admin]
+
+  OrderStatus:
+    type: string
+    enum: [pending, preparing, ready, completed, cancelled]
+
+  PaymentMethod:
+    type: string
+    enum: [cash, promptpay, card, mockup]
+
+  PaymentStatus:
+    type: string
+    enum: [pending, paid, failed, refunded]
+
+  TableStatus:
+    type: string
+    enum: [available, occupied, reserved]
+
+  # Domain Types
+  Category:
+    type: object
+    properties:
+      id: string
+      name: string
+      sortOrder: integer
+      isActive: boolean
+      createdAt: datetime
+      updatedAt: datetime
+
+  Menu:
+    type: object
+    properties:
+      id: string
+      categoryId: string
+      name: string
+      description?: string
+      price: number
+      imageUrl?: string
+      isAvailable: boolean
+      sortOrder: integer
+      createdAt: datetime
+      updatedAt: datetime
+
+  Table:
+    type: object
+    properties:
+      id: string
+      number: integer
+      name: string
+      capacity: integer
+      status: TableStatus
+      createdAt: datetime
+      updatedAt: datetime
+
+  Staff:
+    type: object
+    properties:
+      id: string
+      email: string
+      name: string
+      role: UserRole
+      isActive: boolean
+      createdAt: datetime
+
+  OrderItem:
+    type: object
+    properties:
+      id: string
+      menuId: string
+      menuName: string
+      menuPrice: number
+      quantity: integer
+      lineTotal: number
+      note?: string
+
+  OrderSummary:
+    type: object
+    properties:
+      id: string
+      orderNumber: string
+      status: OrderStatus
+      subtotal: number
+      discount: number
+      total: number
+      note?: string
+      createdAt: datetime
+      table?:
+        type: object
+        properties:
+          id: string
+          name: string
+      staff:
+        type: object
+        properties:
+          id: string
+          name: string
+      _count:
+        type: object
+        properties:
+          items: integer
+
+  OrderDetail:
+    type: OrderSummary
+    properties:
+      items: OrderItem[]
+
+  ReceiptItem:
+    type: object
+    properties:
+      name: string
+      qty: integer
+      unitPrice: number
+      lineTotal: number
+      note?: string
+
+  ReceiptData:
+    type: object
+    properties:
+      receiptNumber: string
+      orderNumber: string
+      tableName?: string
+      staffName: string
+      items: ReceiptItem[]
+      subtotal: number
+      discount: number
+      total: number
+      paymentMethod: PaymentMethod
+      paidAt: datetime
+      shopName: string
+
+# ─── Resources ───────────────────────────────────────────────────────────────
+
+/auth:
+  /signout:
+    post:
+      description: Sign out — ยกเลิก Supabase session และ clear cookies
+      securedBy: [supabaseSession]
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+        500:
+          body:
+            application/json:
+              type: ErrorResponse
+
+/categories:
+  description: จัดการหมวดหมู่เมนู
+  is: [secured]
+
+  get:
+    description: ดึงหมวดหมู่ทั้งหมด — เรียงตาม sortOrder
+    responses:
+      200:
+        body:
+          application/json:
+            type: object
+            properties:
+              success:
+                type: boolean
+                enum: [true]
+              data: Category[]
+            example:
+              success: true
+              data:
+                - id: "cuid_example"
+                  name: "เครื่องดื่มร้อน"
+                  sortOrder: 0
+                  isActive: true
+                  createdAt: "2025-01-01T00:00:00.000Z"
+                  updatedAt: "2025-01-01T00:00:00.000Z"
+
+  post:
+    description: สร้างหมวดหมู่ใหม่ — เฉพาะ admin
+    body:
+      application/json:
+        type: object
+        properties:
+          name:
+            type: string
+            minLength: 1
+            maxLength: 50
+            required: true
+          sortOrder:
+            type: integer
+            minimum: 0
+            default: 0
+            required: false
+          isActive:
+            type: boolean
+            default: true
+            required: false
+        example:
+          name: "เครื่องดื่มเย็น"
+          sortOrder: 1
+          isActive: true
+    responses:
+      201:
+        body:
+          application/json:
+            type: object
+            properties:
+              success:
+                type: boolean
+                enum: [true]
+              data: Category
+      400:
+        body:
+          application/json:
+            type: ErrorResponse
+      403:
+        body:
+          application/json:
+            type: ErrorResponse
+
+  /{id}:
+    uriParameters:
+      id:
+        type: string
+        description: Category CUID
+
+    get:
+      description: ดึงข้อมูลหมวดหมู่ตาม ID
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data: Category
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+    patch:
+      description: แก้ไขหมวดหมู่ — เฉพาะ admin (partial update)
+      body:
+        application/json:
+          type: object
+          properties:
+            name:
+              type: string
+              minLength: 1
+              maxLength: 50
+              required: false
+            sortOrder:
+              type: integer
+              minimum: 0
+              required: false
+            isActive:
+              type: boolean
+              required: false
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data: Category
+        400:
+          body:
+            application/json:
+              type: ErrorResponse
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+    delete:
+      description: ลบหมวดหมู่ — เฉพาะ admin (จะล้มเหลวถ้ายังมีเมนูอยู่)
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data:
+                  type: object
+                  properties:
+                    message: string
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+        409:
+          description: ยังมีเมนูในหมวดหมู่นี้ ลบไม่ได้
+          body:
+            application/json:
+              type: ErrorResponse
+
+/menus:
+  description: จัดการรายการเมนู
+  is: [secured]
+
+  get:
+    description: ดึงเมนูทั้งหมด พร้อม category — กรองได้ตาม categoryId และ isAvailable
+    queryParameters:
+      categoryId:
+        type: string
+        required: false
+        description: กรองตาม category CUID
+      isAvailable:
+        type: boolean
+        required: false
+        description: กรองตามสถานะพร้อมให้บริการ
+    responses:
+      200:
+        body:
+          application/json:
+            type: object
+            properties:
+              success:
+                type: boolean
+                enum: [true]
+              data: Menu[]
+
+  post:
+    description: สร้างเมนูใหม่ — เฉพาะ admin
+    body:
+      application/json:
+        type: object
+        properties:
+          categoryId:
+            type: string
+            required: true
+            description: CUID ของหมวดหมู่
+          name:
+            type: string
+            minLength: 1
+            maxLength: 100
+            required: true
+          description:
+            type: string
+            maxLength: 300
+            required: false
+          price:
+            type: number
+            minimum: 0.01
+            maximum: 99999
+            required: true
+          imageUrl:
+            type: string
+            required: false
+          isAvailable:
+            type: boolean
+            default: true
+            required: false
+          sortOrder:
+            type: integer
+            minimum: 0
+            default: 0
+            required: false
+        example:
+          categoryId: "cuid_category"
+          name: "ลาเต้ร้อน"
+          description: "เอสเพรสโซ่ผสมนม"
+          price: 85
+          isAvailable: true
+          sortOrder: 0
+    responses:
+      201:
+        body:
+          application/json:
+            type: object
+            properties:
+              success:
+                type: boolean
+                enum: [true]
+              data: Menu
+      400:
+        body:
+          application/json:
+            type: ErrorResponse
+
+  /{id}:
+    uriParameters:
+      id:
+        type: string
+        description: Menu CUID
+
+    get:
+      description: ดึงข้อมูลเมนูตาม ID
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data: Menu
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+    patch:
+      description: |
+        แก้ไขเมนู — เฉพาะ admin (partial update)
+        ใช้ได้สำหรับทั้ง update ทั่วไป และ toggle isAvailable
+      body:
+        application/json:
+          type: object
+          properties:
+            categoryId:
+              type: string
+              required: false
+            name:
+              type: string
+              minLength: 1
+              maxLength: 100
+              required: false
+            description:
+              type: string
+              maxLength: 300
+              required: false
+            price:
+              type: number
+              minimum: 0.01
+              maximum: 99999
+              required: false
+            imageUrl:
+              type: string
+              required: false
+            isAvailable:
+              type: boolean
+              required: false
+            sortOrder:
+              type: integer
+              minimum: 0
+              required: false
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data: Menu
+        400:
+          body:
+            application/json:
+              type: ErrorResponse
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+    delete:
+      description: ลบเมนู — เฉพาะ admin
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data:
+                  type: object
+                  properties:
+                    message: string
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+/orders:
+  description: จัดการออเดอร์
+  is: [secured]
+
+  get:
+    description: |
+      ดึงรายการออเดอร์ (paginated)
+      - cashier / barista: เห็นเฉพาะ active orders (pending, preparing, ready)
+      - admin: เห็นทั้งหมด
+    is: [paginated]
+    queryParameters:
+      status:
+        type: OrderStatus
+        required: false
+        description: กรองตามสถานะออเดอร์
+    responses:
+      200:
+        body:
+          application/json:
+            type: object
+            properties:
+              success:
+                type: boolean
+                enum: [true]
+              data:
+                type: object
+                properties:
+                  items: OrderSummary[]
+                  meta:
+                    type: object
+                    properties:
+                      total: integer
+                      page: integer
+                      limit: integer
+      400:
+        description: status parameter ไม่ถูกต้อง
+        body:
+          application/json:
+            type: ErrorResponse
+
+  post:
+    description: สร้างออเดอร์ใหม่ — cashier, admin เท่านั้น (ราคาคำนวณ server-side)
+    body:
+      application/json:
+        type: object
+        properties:
+          tableId:
+            type: string
+            description: CUID ของโต๊ะ (null = takeaway)
+            required: true
+            example: null
+          items:
+            type: array
+            minItems: 1
+            maxItems: 50
+            required: true
+            items:
+              type: object
+              properties:
+                menuId:
+                  type: string
+                  required: true
+                quantity:
+                  type: integer
+                  minimum: 1
+                  maximum: 99
+                  required: true
+                note:
+                  type: string
+                  maxLength: 100
+                  required: false
+          discount:
+            type: number
+            minimum: 0
+            maximum: 100000
+            default: 0
+            required: false
+          note:
+            type: string
+            maxLength: 200
+            required: false
+        example:
+          tableId: "cuid_table"
+          items:
+            - menuId: "cuid_menu_1"
+              quantity: 2
+              note: "หวานน้อย"
+            - menuId: "cuid_menu_2"
+              quantity: 1
+          discount: 20
+          note: "ลูกค้าประจำ"
+    responses:
+      201:
+        headers:
+          Location:
+            type: string
+            description: URL ของ order ที่สร้าง เช่น /api/orders/{id}
+        body:
+          application/json:
+            type: object
+            properties:
+              success:
+                type: boolean
+                enum: [true]
+              data: OrderDetail
+      400:
+        body:
+          application/json:
+            type: ErrorResponse
+
+  /{id}:
+    uriParameters:
+      id:
+        type: string
+        description: Order CUID
+
+    get:
+      description: ดึงรายละเอียดออเดอร์ตาม ID พร้อม items
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data: OrderDetail
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+    patch:
+      description: |
+        อัปเดตสถานะออเดอร์
+        - cashier: pending → preparing, cancelled
+        - barista: preparing → ready
+        - admin: ทุก transition
+      body:
+        application/json:
+          type: object
+          properties:
+            status:
+              type: OrderStatus
+              required: true
+          example:
+            status: "preparing"
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data: OrderDetail
+        400:
+          body:
+            application/json:
+              type: ErrorResponse
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+/payment:
+  description: ชำระเงินออเดอร์ — ทุก method สร้าง Payment + Receipt + อัปเดต Order/Table อัตโนมัติ
+  is: [secured]
+
+  /cash:
+    post:
+      description: |
+        ชำระด้วยเงินสด — cashier, admin เท่านั้น
+        ระบบคำนวณทอน (change) ให้อัตโนมัติ
+      body:
+        application/json:
+          type: object
+          properties:
+            orderId:
+              type: string
+              required: true
+            amountTendered:
+              type: number
+              minimum: 0.01
+              required: true
+              description: จำนวนเงินที่รับมาจากลูกค้า (ต้องไม่น้อยกว่ายอดรวม)
+          example:
+            orderId: "cuid_order"
+            amountTendered: 200
+      responses:
+        201:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data:
+                  type: object
+                  properties:
+                    receiptId: string
+                    receiptNumber: string
+                    change: number
+              example:
+                success: true
+                data:
+                  receiptId: "cuid_receipt"
+                  receiptNumber: "R-20250112-001"
+                  change: 35
+        400:
+          description: เงินไม่พอ / ออเดอร์สถานะไม่ถูกต้อง / ชำระแล้ว
+          body:
+            application/json:
+              type: ErrorResponse
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+  /promptpay:
+    post:
+      description: ชำระด้วย PromptPay — cashier, admin เท่านั้น (mockup flow)
+      body:
+        application/json:
+          type: object
+          properties:
+            orderId:
+              type: string
+              required: true
+          example:
+            orderId: "cuid_order"
+      responses:
+        201:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data:
+                  type: object
+                  properties:
+                    receiptId: string
+                    receiptNumber: string
+        400:
+          body:
+            application/json:
+              type: ErrorResponse
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+  /card:
+    post:
+      description: |
+        ชำระด้วยบัตรเครดิต/เดบิต ผ่าน Omise — cashier, admin เท่านั้น
+        ต้อง tokenize บัตรด้วย Omise.js ฝั่ง client ก่อน แล้วส่ง token มา
+      body:
+        application/json:
+          type: object
+          properties:
+            orderId:
+              type: string
+              required: true
+            omiseToken:
+              type: string
+              pattern: "^tokn_"
+              required: true
+              description: Omise card token (tokn_...) จาก Omise.js
+          example:
+            orderId: "cuid_order"
+            omiseToken: "tokn_test_xxxxxxxxxxxx"
+      responses:
+        201:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data:
+                  type: object
+                  properties:
+                    receiptId: string
+                    receiptNumber: string
+                    chargeId:
+                      type: string
+                      description: Omise charge ID สำหรับ audit trail
+        400:
+          description: บัตรถูกปฏิเสธ / Omise error / ออเดอร์สถานะไม่ถูกต้อง
+          body:
+            application/json:
+              type: ErrorResponse
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+  /mockup:
+    post:
+      description: |
+        จำลองการชำระเงิน — ใช้ใน development/testing เท่านั้น
+        simulateSuccess=false จะบันทึก failed payment แต่ไม่สร้าง receipt
+      body:
+        application/json:
+          type: object
+          properties:
+            orderId:
+              type: string
+              required: true
+            simulateSuccess:
+              type: boolean
+              required: true
+          example:
+            orderId: "cuid_order"
+            simulateSuccess: true
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data:
+                  type: object
+                  properties:
+                    receiptId:
+                      type: string
+                      description: null ถ้า simulateSuccess=false
+                    receiptNumber:
+                      type: string
+                      description: null ถ้า simulateSuccess=false
+                    success: boolean
+
+/staff:
+  description: จัดการข้อมูลพนักงาน — เฉพาะ admin
+  is: [secured]
+
+  get:
+    description: |
+      ดึงรายชื่อพนักงานทั้งหมด — admin only
+      หมายเหตุ: การสร้างพนักงานใหม่ทำผ่าน Supabase Auth invite flow ไม่ใช่ endpoint นี้
+    responses:
+      200:
+        body:
+          application/json:
+            type: object
+            properties:
+              success:
+                type: boolean
+                enum: [true]
+              data: Staff[]
+      403:
+        body:
+          application/json:
+            type: ErrorResponse
+
+  /{id}:
+    uriParameters:
+      id:
+        type: string
+        description: Staff UUID (Supabase Auth user ID)
+
+    get:
+      description: ดึงข้อมูลพนักงานตาม ID — admin only
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data: Staff
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+    patch:
+      description: แก้ไขข้อมูลพนักงาน (ชื่อ / role / isActive) — admin only
+      body:
+        application/json:
+          type: object
+          properties:
+            name:
+              type: string
+              minLength: 1
+              maxLength: 100
+              required: false
+            role:
+              type: UserRole
+              required: false
+            isActive:
+              type: boolean
+              required: false
+          description: ต้องส่งอย่างน้อย 1 field
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data: Staff
+        400:
+          body:
+            application/json:
+              type: ErrorResponse
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+    delete:
+      description: ลบพนักงาน (soft delete หรือ hard delete ตาม implementation) — admin only
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data:
+                  type: object
+                  properties:
+                    message: string
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+/tables:
+  description: จัดการโต๊ะในร้าน
+  is: [secured]
+
+  get:
+    description: ดึงรายชื่อโต๊ะทั้งหมด พร้อมสถานะปัจจุบัน
+    responses:
+      200:
+        body:
+          application/json:
+            type: object
+            properties:
+              success:
+                type: boolean
+                enum: [true]
+              data: Table[]
+
+  post:
+    description: เพิ่มโต๊ะใหม่ — admin only
+    body:
+      application/json:
+        type: object
+        properties:
+          number:
+            type: integer
+            minimum: 1
+            maximum: 999
+            required: true
+          name:
+            type: string
+            minLength: 1
+            maxLength: 50
+            required: true
+          capacity:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 4
+            required: false
+        example:
+          number: 5
+          name: "โต๊ะ 5"
+          capacity: 4
+    responses:
+      201:
+        body:
+          application/json:
+            type: object
+            properties:
+              success:
+                type: boolean
+                enum: [true]
+              data: Table
+      400:
+        body:
+          application/json:
+            type: ErrorResponse
+      409:
+        description: หมายเลขโต๊ะซ้ำ
+        body:
+          application/json:
+            type: ErrorResponse
+
+  /{id}:
+    uriParameters:
+      id:
+        type: string
+        description: Table CUID
+
+    get:
+      description: ดึงข้อมูลโต๊ะตาม ID
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data: Table
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+    patch:
+      description: |
+        แก้ไขโต๊ะ — admin only
+        ใช้ได้ทั้ง update ข้อมูลทั่วไป (name, capacity) และ update status (available/occupied/reserved)
+      body:
+        application/json:
+          type: object
+          properties:
+            name:
+              type: string
+              minLength: 1
+              maxLength: 50
+              required: false
+            capacity:
+              type: integer
+              minimum: 1
+              maximum: 50
+              required: false
+            status:
+              type: TableStatus
+              required: false
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data: Table
+        400:
+          body:
+            application/json:
+              type: ErrorResponse
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+
+    delete:
+      description: ลบโต๊ะ — admin only (จะล้มเหลวถ้ามี active order อยู่)
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data:
+                  type: object
+                  properties:
+                    message: string
+        404:
+          body:
+            application/json:
+              type: ErrorResponse
+        409:
+          description: โต๊ะมีออเดอร์ที่ยังไม่เสร็จ ลบไม่ได้
+          body:
+            application/json:
+              type: ErrorResponse
+
+/cron:
+  description: Cron jobs — ต้องผ่าน CRON_SECRET header เท่านั้น (ไม่ใช้ Supabase session)
+
+  /daily-report:
+    get:
+      description: |
+        สร้าง daily sales report และส่ง email — เรียกโดย Vercel Cron เท่านั้น
+        Authorization: Bearer {CRON_SECRET}
+      headers:
+        Authorization:
+          type: string
+          pattern: "^Bearer .+"
+          required: true
+          description: "Bearer {CRON_SECRET} จาก environment variable"
+      responses:
+        200:
+          body:
+            application/json:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  enum: [true]
+                data:
+                  type: object
+                  properties:
+                    message: string
+        401:
+          description: CRON_SECRET ไม่ถูกต้อง
+          body:
+            application/json:
+              type: ErrorResponse

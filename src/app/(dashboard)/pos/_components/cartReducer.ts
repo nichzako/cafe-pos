@@ -10,6 +10,7 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
   switch (action.type) {
     case "ADD_ITEM": {
       const existing = state.items.find((i) => i.menuId === action.item.menuId);
+      debugger; // [BP16] ดู: existing — undefined = เพิ่มใหม่, object = บวก quantity
       if (existing) {
         return {
           ...state,
@@ -78,5 +79,6 @@ export function getCartSubtotal(items: CartItem[]): number {
 }
 
 export function getCartTotal(items: CartItem[], discount: number): number {
+  debugger; // [BP17] ดู: items.length, discount, getCartSubtotal(items) — เช็คยอดรวมฝั่ง client
   return Math.max(0, getCartSubtotal(items) - discount);
 }

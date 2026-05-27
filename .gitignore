@@ -13,6 +13,12 @@
 # testing
 /coverage
 
+# playwright
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+e2e/.auth/user.json
+
 # next.js
 /.next/
 /out/
@@ -39,4 +45,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# claude code local config
+.claude/settings.local.json
+.claude/worktrees/
+.claude/skills/
 

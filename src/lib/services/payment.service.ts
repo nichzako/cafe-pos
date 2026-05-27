@@ -130,13 +130,16 @@ async function commitPayment(
 
       return { receiptId: receipt.id, receiptNumber };
     } catch (err) {
-      // P2002 = unique constraint on receiptNumber — retry once
-      if (
-        attempt < RECEIPT_NUMBER_MAX_RETRIES - 1 &&
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === "P2002"
-      ) {
-        continue;
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        const target = (err.meta?.target as string[] | undefined) ?? [];
+        // receiptNumber collision is random — retry with a new number
+        if (target.includes("receiptNumber") && attempt < RECEIPT_NUMBER_MAX_RETRIES - 1) {
+          continue;
+        }
+        // orderId collision means a concurrent request already committed payment
+        if (target.includes("orderId")) {
+          throw conflict("ออเดอร์นี้ชำระเงินไปแล้ว");
+        }
       }
       throw err;
     }

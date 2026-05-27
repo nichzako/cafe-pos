@@ -34,6 +34,7 @@ export async function requireAuth(
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  debugger; // [BP1] ดู: user.id, user.email — ถ้า null จะ throw 401
 
   if (!user) throw unauthorized();
 
@@ -41,8 +42,10 @@ export async function requireAuth(
     where: { authId: user.id },
     select: { id: true, authId: true, name: true, role: true, isActive: true },
   });
+  debugger; // [BP2] ดู: staff.id, staff.name, staff.role, staff.isActive
 
   if (!staff) throw unauthorized("ไม่พบข้อมูลพนักงาน กรุณาติดต่อผู้ดูแลระบบ");
+  debugger; // [BP3] ดู: staff.isActive — ต้อง true ถึงจะผ่าน
   if (!staff.isActive) throw forbidden("บัญชีนี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ");
 
   return staff as AuthenticatedStaff;

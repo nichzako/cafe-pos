@@ -34,6 +34,7 @@ export async function createOrder(input: CreateOrderInput) {
   // Step 1: Validate table
   if (tableId) {
     const table = await prisma.table.findUnique({ where: { id: tableId } });
+    debugger; // [BP10] ดู: table.status — "available"/"occupied"/"reserved", null = ไม่มีโต๊ะนี้
     if (!table) throw notFound("ไม่พบโต๊ะที่เลือก");
     if (table.status === "reserved") throw badRequest("โต๊ะนี้ถูกจองแล้ว");
   }
@@ -44,6 +45,7 @@ export async function createOrder(input: CreateOrderInput) {
     where: { id: { in: menuIds }, isAvailable: true },
     select: { id: true, name: true, price: true },
   });
+  debugger; // [BP11] ดู: menuIds.length vs menus.length — ถ้าไม่เท่ากัน = บางเมนู unavailable
 
   if (menus.length !== menuIds.length) {
     throw badRequest("บางเมนูไม่พร้อมให้บริการ กรุณาตรวจสอบรายการอีกครั้ง");
@@ -51,6 +53,7 @@ export async function createOrder(input: CreateOrderInput) {
 
   // Step 3: Calculate totals server-side
   const menuMap = new Map(menus.map((m) => [m.id, m]));
+  debugger; // [BP12] ดู: menuMap — ขยาย Map ใน Variables panel เช็คราคาแต่ละเมนู
   const orderItems = items.map((item) => {
     const menu = menuMap.get(item.menuId)!;
     return {
@@ -62,14 +65,17 @@ export async function createOrder(input: CreateOrderInput) {
       lineTotal: new Prisma.Decimal(Number(menu.price) * item.quantity),
     };
   });
+  debugger; // [BP13] ดู: orderItems — แต่ละ item มี lineTotal = menuPrice × quantity ถูกมั้ย
 
   const subtotal = orderItems.reduce((sum, i) => sum + Number(i.lineTotal), 0);
   const total = Math.max(0, subtotal - discount);
+  debugger; // [BP14] ดู: subtotal, discount, total — total ต้อง ≥ 0 เสมอ
 
   // Step 4: Create order + update table in a single transaction
   // Retry once on order number collision (generateOrderNumber is non-atomic)
   for (let attempt = 0; attempt < ORDER_NUMBER_MAX_RETRIES; attempt++) {
     const orderNumber = await generateOrderNumber();
+    debugger; // [BP15] ดู: orderNumber (format เช่น "ORD-001"), attempt (0 = ครั้งแรก)
 
     try {
       const order = await prisma.$transaction(async (tx) => {
